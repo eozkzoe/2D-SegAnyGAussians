@@ -56,7 +56,7 @@ def get_combined_args(parser : ArgumentParser):
 
 def generate_grid_index(depth):
     h, w = depth.shape
-    grid = torch.meshgrid([torch.arange(h), torch.arange(w)])
+    grid = torch.meshgrid([torch.arange(h), torch.arange(w)], indexing="ij")
     grid = torch.stack(grid, dim=-1)
     return grid
 

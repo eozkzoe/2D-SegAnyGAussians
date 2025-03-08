@@ -1,5 +1,6 @@
 # Borrowed from OmniSeg3D-GS (https://github.com/OceanYing/OmniSeg3D-GS)
 import torch
+import json
 from scene import Scene
 import os
 from tqdm import tqdm
@@ -552,11 +553,11 @@ class GaussianSplattingGUI:
         mean = torch.mean(X, dim=0)
         X = X - mean
         covariance_matrix = (1 / n) * torch.matmul(X.T, X).float()  # An old torch bug: matmul float32->float16, 
-        eigenvalues, eigenvectors = torch.linalg.eig(covariance_matrix, eigenvectors=True)
-        eigenvalues = torch.norm(eigenvalues, dim=1)
+        eigenvalues, eigenvectors = torch.linalg.eig(covariance_matrix)
+        eigenvalues = torch.abs(eigenvalues)
         idx = torch.argsort(-eigenvalues)
         eigenvectors = eigenvectors[:, idx]
-        proj_mat = eigenvectors[:, 0:n_components]
+        proj_mat = eigenvectors[:, 0:n_components].real
         
         return proj_mat
     
