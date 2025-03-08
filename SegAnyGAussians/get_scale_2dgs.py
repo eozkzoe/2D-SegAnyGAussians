@@ -11,19 +11,22 @@ import json
 import cv2
 from tqdm import tqdm
 
-def get_combined_args(parser: ArgumentParser):
+def get_combined_args(parser: ArgumentParser, scene_path: str):
     cfgfile_string = "Namespace()"
     args_cmdline = parser.parse_args()
     
+    # Override model_path with scene_path
+    args_cmdline.model_path = scene_path
+    
     target_cfg_file = "cfg_args"
     try:
-        cfgfilepath = os.path.join(args_cmdline.model_path, target_cfg_file)
+        cfgfilepath = os.path.join(scene_path, target_cfg_file)
         print("Looking for config file in", cfgfilepath)
         with open(cfgfilepath) as cfg_file:
             print("Config file found: {}".format(cfgfilepath))
             cfgfile_string = cfg_file.read()
-    except TypeError:
-        print("Config file not found")
+    except (TypeError, FileNotFoundError):
+        print("Config file not found, using defaults")
         pass
     
     args_cfgfile = eval(cfgfile_string)
@@ -43,9 +46,8 @@ def extract_scales(scene_path, image_root=None):
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     parser.add_argument("--image_root", default=None, type=str)
-    parser.add_argument("--model_path", default=scene_path, type=str)
     
-    args = get_combined_args(parser)
+    args = get_combined_args(parser, scene_path)
     
     # Initialize system state
     safe_state(True)
