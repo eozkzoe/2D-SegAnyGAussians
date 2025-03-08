@@ -33,19 +33,15 @@ def get_combined_args(parser: ArgumentParser):
             merged_dict[k] = v
     return Namespace(**merged_dict)
 
-def extract_scales(scene_path, image_root=None, iteration=None):
-    # Load scene
-    if iteration is None:
-        # Find latest iteration
-        checkpoints = [os.path.splitext(f)[0] for f in os.listdir(scene_path) if f.endswith('.ply')]
-        iterations = [int(c.split('_')[-1]) for c in checkpoints]
-        iteration = max(iterations) if iterations else 7000
+def extract_scales(scene_path, image_root=None):
+    # Verify input.ply exists
+    if not os.path.exists(os.path.join(scene_path, 'input.ply')):
+        raise FileNotFoundError(f"Could not find input.ply in {scene_path}")
 
     # Set up model parameters
     parser = ArgumentParser(description="Scale extraction for 2D Gaussian Splatting")
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
-    parser.add_argument("--iteration", default=-1, type=int)
     parser.add_argument("--image_root", default=None, type=str)
     parser.add_argument("--model_path", default=scene_path, type=str)
     
@@ -113,11 +109,11 @@ def extract_scales(scene_path, image_root=None, iteration=None):
                          os.path.join(output_dir, f"{view.image_name}.pt"))
         
         # Also save the base scales
-        with open(os.path.join(output_dir, f'base_scales_{iteration}.json'), 'w') as f:
+        with open(os.path.join(output_dir, 'base_scales.json'), 'w') as f:
             json.dump(scales, f)
     else:
         # If no image_root, save in scene directory
-        output_path = os.path.join(scene_path, f'scales_{iteration}.json')
+        output_path = os.path.join(scene_path, 'scales.json')
         with open(output_path, 'w') as f:
             json.dump(scales, f)
     
@@ -128,7 +124,6 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Extract scales from 2D Gaussian scene")
     parser.add_argument("--scene_path", required=True, help="Path to the scene directory")
     parser.add_argument("--image_root", default=None, help="Path to image root directory (optional)")
-    parser.add_argument("--iteration", type=int, help="Iteration to load (default: latest)")
     args = parser.parse_args()
     
-    extract_scales(args.scene_path, args.image_root, args.iteration) 
+    extract_scales(args.scene_path, args.image_root) 
