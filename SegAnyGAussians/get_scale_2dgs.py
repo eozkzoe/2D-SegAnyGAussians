@@ -5,11 +5,35 @@ from arguments import ModelParams, PipelineParams, OptimizationParams
 from gaussian_renderer import render
 import os
 from utils.general_utils import safe_state
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from utils.image_utils import psnr
 import json
+import cv2
+from tqdm import tqdm
 
-def extract_scales(scene_path, iteration=None):
+def get_combined_args(parser: ArgumentParser):
+    cfgfile_string = "Namespace()"
+    args_cmdline = parser.parse_args()
+    
+    target_cfg_file = "cfg_args"
+    try:
+        cfgfilepath = os.path.join(args_cmdline.model_path, target_cfg_file)
+        print("Looking for config file in", cfgfilepath)
+        with open(cfgfilepath) as cfg_file:
+            print("Config file found: {}".format(cfgfilepath))
+            cfgfile_string = cfg_file.read()
+    except TypeError:
+        print("Config file not found")
+        pass
+    
+    args_cfgfile = eval(cfgfile_string)
+    merged_dict = vars(args_cfgfile).copy()
+    for k,v in vars(args_cmdline).items():
+        if v is not None:
+            merged_dict[k] = v
+    return Namespace(**merged_dict)
+
+def extract_scales(scene_path, image_root=None, iteration=None):
     # Load scene
     if iteration is None:
         # Find latest iteration
@@ -19,10 +43,13 @@ def extract_scales(scene_path, iteration=None):
 
     # Set up model parameters
     parser = ArgumentParser(description="Scale extraction for 2D Gaussian Splatting")
-    ModelParams.init_parser(parser)
-    PipelineParams.init_parser(parser)
-    OptimizationParams.init_parser(parser)
-    args = parser.parse_args(['--model_path', scene_path])
+    model = ModelParams(parser, sentinel=True)
+    pipeline = PipelineParams(parser)
+    parser.add_argument("--iteration", default=-1, type=int)
+    parser.add_argument("--image_root", default=None, type=str)
+    parser.add_argument("--model_path", default=scene_path, type=str)
+    
+    args = get_combined_args(parser)
     
     # Initialize system state
     safe_state(True)
@@ -51,18 +78,57 @@ def extract_scales(scene_path, iteration=None):
             'opacity': float(opacity[i])
         })
     
-    # Save scales to JSON file
-    output_path = os.path.join(scene_path, f'scales_{iteration}.json')
-    with open(output_path, 'w') as f:
-        json.dump(scales, f)
+    # Save scales to appropriate location
+    if image_root is not None:
+        # If image_root is provided, save in mask_scales directory like original SAGA
+        output_dir = os.path.join(image_root, 'mask_scales')
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Save per-view scales if we have image data
+        if os.path.exists(os.path.join(image_root, 'images')):
+            cameras = scene.getTrainCameras()
+            background = torch.zeros(gaussians.get_xyz.shape[0], 3, device='cuda')
+            
+            for view in tqdm(cameras, desc="Processing views"):
+                # Render view
+                render_pkg = render(view, gaussians, pipeline.extract(args), background)
+                
+                # Get depth information
+                depth = render_pkg['surf_depth'].cpu()
+                
+                # Calculate view-dependent scales
+                view_scales = []
+                for scale_info in scales:
+                    pos = torch.tensor(scale_info['position'])
+                    # Project position to view space
+                    view_pos = view.world_to_camera(pos.unsqueeze(0))
+                    view_depth = view_pos[0, 2].item()
+                    
+                    # Scale the base scale by depth
+                    view_scale = scale_info['scale'] * view_depth
+                    view_scales.append(view_scale)
+                
+                # Save view-specific scales
+                torch.save(torch.tensor(view_scales), 
+                         os.path.join(output_dir, f"{view.image_name}.pt"))
+        
+        # Also save the base scales
+        with open(os.path.join(output_dir, f'base_scales_{iteration}.json'), 'w') as f:
+            json.dump(scales, f)
+    else:
+        # If no image_root, save in scene directory
+        output_path = os.path.join(scene_path, f'scales_{iteration}.json')
+        with open(output_path, 'w') as f:
+            json.dump(scales, f)
     
-    print(f"Saved {len(scales)} scales to {output_path}")
+    print(f"Saved {len(scales)} scales")
     return scales
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Extract scales from 2D Gaussian scene")
     parser.add_argument("--scene_path", required=True, help="Path to the scene directory")
+    parser.add_argument("--image_root", default=None, help="Path to image root directory (optional)")
     parser.add_argument("--iteration", type=int, help="Iteration to load (default: latest)")
     args = parser.parse_args()
     
-    extract_scales(args.scene_path, args.iteration) 
+    extract_scales(args.scene_path, args.image_root, args.iteration) 
