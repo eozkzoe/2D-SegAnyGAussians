@@ -34,6 +34,11 @@ def get_combined_args(parser: ArgumentParser, scene_path: str):
     for k,v in vars(args_cmdline).items():
         if v is not None:
             merged_dict[k] = v
+            
+    # Add default values for required parameters if not present
+    if 'allow_principle_point_shift' not in merged_dict:
+        merged_dict['allow_principle_point_shift'] = False
+    
     return Namespace(**merged_dict)
 
 def extract_scales(scene_path, image_root=None):
@@ -46,6 +51,7 @@ def extract_scales(scene_path, image_root=None):
     model = ModelParams(parser, sentinel=True)
     pipeline = PipelineParams(parser)
     parser.add_argument("--image_root", default=None, type=str)
+    parser.add_argument("--allow_principle_point_shift", action="store_true", help="Allow camera principle point shift")
     
     args = get_combined_args(parser, scene_path)
     
@@ -126,6 +132,7 @@ if __name__ == "__main__":
     parser = ArgumentParser(description="Extract scales from 2D Gaussian scene")
     parser.add_argument("--scene_path", required=True, help="Path to the scene directory")
     parser.add_argument("--image_root", default=None, help="Path to image root directory (optional)")
+    parser.add_argument("--allow_principle_point_shift", action="store_true", help="Allow camera principle point shift")
     args = parser.parse_args()
     
     extract_scales(args.scene_path, args.image_root) 
