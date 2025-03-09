@@ -72,14 +72,14 @@ def extract_scales(model_path, image_root=None):
     scales = []
     for i in range(len(xyz)):
         # Compute scale from surfel parameters
-        scale = np.mean(scaling[i])  # Average scale across dimensions
-        normal = rotation[i]  # Normal direction from rotation
+        scale = float(np.mean(scaling[i]).item())  # Average scale across dimensions
+        normal = rotation[i].tolist()  # Normal direction from rotation
         
         scales.append({
             'position': xyz[i].tolist(),
-            'scale': float(scale),
-            'normal': normal.tolist(),
-            'opacity': float(opacity[i])
+            'scale': scale,
+            'normal': normal,
+            'opacity': float(opacity[i].item())  # Properly extract scalar value
         })
     
     # Save scales to appropriate location
@@ -135,4 +135,4 @@ if __name__ == "__main__":
     parser.add_argument("--allow_principle_point_shift", action="store_true", help="Allow camera principle point shift")
     args = parser.parse_args()
     
-    extract_scales(args.model_path, args.image_root) 
+    extract_scales(args.model_path, args.image_root)
