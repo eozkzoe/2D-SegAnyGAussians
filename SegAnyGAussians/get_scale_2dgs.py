@@ -11,16 +11,16 @@ import json
 import cv2
 from tqdm import tqdm
 
-def get_combined_args(parser: ArgumentParser, scene_path: str):
+def get_combined_args(parser: ArgumentParser, model_path: str):
     cfgfile_string = "Namespace()"
     args_cmdline = parser.parse_args()
     
-    # Override model_path with scene_path
-    args_cmdline.model_path = scene_path
+    # Override model_path with model_path
+    args_cmdline.model_path = model_path
     
     target_cfg_file = "cfg_args"
     try:
-        cfgfilepath = os.path.join(scene_path, target_cfg_file)
+        cfgfilepath = os.path.join(model_path, target_cfg_file)
         print("Looking for config file in", cfgfilepath)
         with open(cfgfilepath) as cfg_file:
             print("Config file found: {}".format(cfgfilepath))
@@ -41,10 +41,10 @@ def get_combined_args(parser: ArgumentParser, scene_path: str):
     
     return Namespace(**merged_dict)
 
-def extract_scales(scene_path, image_root=None):
+def extract_scales(model_path, image_root=None):
     # Verify input.ply exists
-    if not os.path.exists(os.path.join(scene_path, 'input.ply')):
-        raise FileNotFoundError(f"Could not find input.ply in {scene_path}")
+    if not os.path.exists(os.path.join(model_path, 'input.ply')):
+        raise FileNotFoundError(f"Could not find input.ply in {model_path}")
 
     # Set up model parameters
     parser = ArgumentParser(description="Scale extraction for 2D Gaussian Splatting")
@@ -53,7 +53,7 @@ def extract_scales(scene_path, image_root=None):
     parser.add_argument("--image_root", default=None, type=str)
     parser.add_argument("--allow_principle_point_shift", action="store_true", help="Allow camera principle point shift")
     
-    args = get_combined_args(parser, scene_path)
+    args = get_combined_args(parser, model_path)
     
     # Initialize system state
     safe_state(True)
@@ -121,7 +121,7 @@ def extract_scales(scene_path, image_root=None):
             json.dump(scales, f)
     else:
         # If no image_root, save in scene directory
-        output_path = os.path.join(scene_path, 'scales.json')
+        output_path = os.path.join(model_path, 'scales.json')
         with open(output_path, 'w') as f:
             json.dump(scales, f)
     
@@ -130,9 +130,9 @@ def extract_scales(scene_path, image_root=None):
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="Extract scales from 2D Gaussian scene")
-    parser.add_argument("--scene_path", required=True, help="Path to the scene directory")
+    parser.add_argument("--model_path", required=True, help="Path to the scene directory")
     parser.add_argument("--image_root", default=None, help="Path to image root directory (optional)")
     parser.add_argument("--allow_principle_point_shift", action="store_true", help="Allow camera principle point shift")
     args = parser.parse_args()
     
-    extract_scales(args.scene_path, args.image_root) 
+    extract_scales(args.model_path, args.image_root) 
