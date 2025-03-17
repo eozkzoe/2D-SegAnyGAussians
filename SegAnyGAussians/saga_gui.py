@@ -696,8 +696,9 @@ class GaussianSplattingGUI:
             self.save_flag = False
             try:
                 self.save_segmentation(mask_name=dpg.get_value('save_name'))
-            except:
+            except Exception as e:
                 with dpg.window(label="Tips"):
+                    dpg.add_text(f'Error! {e}')
                     dpg.add_text('You should segment the 3D object before save it (click segment3d first).')
 
         self.render_buffer = None
