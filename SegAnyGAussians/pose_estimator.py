@@ -68,6 +68,7 @@ class PoseEstimator:
         max_proj = np.max(projected, axis=0)
         
         dimensions = max_proj - min_proj
+        print(f"center: {pose['centroid']}, 'axes': {axes}, 'dims': {dimensions}")
         
         return {
             'center': pose['centroid'],
