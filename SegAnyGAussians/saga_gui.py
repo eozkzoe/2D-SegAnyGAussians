@@ -967,7 +967,8 @@ class GaussianSplattingGUI:
             print(f"Centroid: {pose['centroid']}")
             print(f"Normal: {pose['normal']}")
             print(f"Planarity: {pose['planarity']:.3f}")
-        except:
+        except Exception as e:
+            print(e)
             with dpg.window(label="Tips"):
                 dpg.add_text(
                     "You should segment the 3D object before save it (click segment3d first)."
