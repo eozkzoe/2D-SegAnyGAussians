@@ -932,17 +932,6 @@ class GaussianSplattingGUI:
 
     def save_segmentation(self, mask_name):
         """Save the current segmentation mask"""
-        self.pose_estimator = PoseEstimator(self.gaussian_model, self.current_mask)
-        pose = self.pose_estimator.estimate_pose()
-        bbox = self.pose_estimator.get_oriented_bbox()
-        pose_info = {
-            "centroid": pose["centroid"].tolist(),
-            "normal": pose["normal"].tolist(),
-            "planarity": float(pose["planarity"]),
-            "bbox_center": bbox["center"].tolist(),
-            "bbox_axes": bbox["axes"].tolist(),
-            "bbox_dimensions": bbox["dimensions"].tolist(),
-        }
 
         try:
             os.makedirs("./segmentation_res", exist_ok=True)
@@ -951,8 +940,24 @@ class GaussianSplattingGUI:
             )
             torch.save(save_mask, f"./segmentation_res/{mask_name}.pt")
             print(f"Saved segmentation mask to: ./segmentation_res/{mask_name}.pt")
+            pose_mask = torch.load(save_mask)
+            pose_mask = pose_mask.squeeze()
+            # assert mask.shape[0] == self._xyz.shape[0]
+            if torch.count_nonzero(pose_mask) == 0:
+                pose_mask = ~pose_mask
+                print("Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first.")
 
-            # pose_path = os.path.join(self.opt.MODEL_PATH, 'segmentation_res', f'{mask_name}_pose.json')
+            self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
+            pose = self.pose_estimator.estimate_pose()
+            bbox = self.pose_estimator.get_oriented_bbox()
+            pose_info = {
+                "centroid": pose["centroid"].tolist(),
+                "normal": pose["normal"].tolist(),
+                "planarity": float(pose["planarity"]),
+                "bbox_center": bbox["center"].tolist(),
+                "bbox_axes": bbox["axes"].tolist(),
+                "bbox_dimensions": bbox["dimensions"].tolist(),
+            }
             with open(f"./segmentation_res/{mask_name}_pose.json", "w") as f:
                 json.dump(pose_info, f, indent=2)
 
