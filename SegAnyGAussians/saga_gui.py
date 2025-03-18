@@ -940,12 +940,14 @@ class GaussianSplattingGUI:
             )
             torch.save(save_mask, f"./segmentation_res/{mask_name}.pt")
             print(f"Saved segmentation mask to: ./segmentation_res/{mask_name}.pt")
-            pose_mask = torch.load(save_mask)
+            pose_mask = torch.load(f"./segmentation_res/{mask_name}.pt")
             pose_mask = pose_mask.squeeze()
             # assert mask.shape[0] == self._xyz.shape[0]
             if torch.count_nonzero(pose_mask) == 0:
                 pose_mask = ~pose_mask
-                print("Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first.")
+                print(
+                    "Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first."
+                )
 
             self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
             pose = self.pose_estimator.estimate_pose()

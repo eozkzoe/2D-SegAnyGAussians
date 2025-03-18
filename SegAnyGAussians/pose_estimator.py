@@ -18,9 +18,7 @@ class PoseEstimator:
         # Get normals directly from rotation matrices
         rotations = self.gaussians.get_rotation[self.mask].detach().cpu().numpy()
         # For 2D Gaussians, the rotation matrix directly gives us the normal
-        normals = rotations
-        mean_normal = np.mean(normals, axis=0)
-        mean_normal = mean_normal / np.linalg.norm(mean_normal)  # Normalize
+        normals = rotations  # Shape should be (N, 3)
         
         # Get opacity weights for weighted calculations
         opacities = self.gaussians.get_opacity[self.mask].detach().cpu().numpy()
@@ -28,8 +26,15 @@ class PoseEstimator:
         
         # Calculate weighted centroid and normal
         weighted_centroid = np.sum(points * weights[:, None], axis=0)
-        weighted_normal = np.sum(normals * weights[:, None], axis=0)
+        # Compute weighted normal directly
+        weighted_normal = np.zeros(3)
+        for i in range(len(normals)):
+            weighted_normal += normals[i] * weights[i]
         weighted_normal = weighted_normal / np.linalg.norm(weighted_normal)
+        
+        # Also compute unweighted mean normal
+        mean_normal = np.mean(normals, axis=0)
+        mean_normal = mean_normal / np.linalg.norm(mean_normal)
         
         # Calculate planarity using PCA for completeness
         pca = PCA(n_components=3)
@@ -84,7 +89,10 @@ class PoseEstimator:
         
         # Weight normals by opacity
         weights = opacities / opacities.sum()
-        weighted_normal = np.sum(normals * weights[:, None], axis=0)
+        # Compute weighted normal directly to avoid memory issues
+        weighted_normal = np.zeros(3)
+        for i in range(len(normals)):
+            weighted_normal += normals[i] * weights[i]
         weighted_normal = weighted_normal / np.linalg.norm(weighted_normal)
         
         return weighted_normal
