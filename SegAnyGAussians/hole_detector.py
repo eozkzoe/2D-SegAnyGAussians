@@ -12,7 +12,7 @@ from scene.cameras import Camera
 from utils.graphics_utils import focal2fov, fov2focal
 
 class HoleDetector:
-    def __init__(self, scene_path, mask_path, output_dir="./hole_detection_results"):
+    def __init__(self, scene_path, mask_path, output_dir="./hole_detection_results", debug=False):
         self.scene_path = scene_path
         self.mask_path = mask_path
         self.output_dir = output_dir
@@ -43,7 +43,9 @@ class HoleDetector:
         self.best_camera = None
         self.best_ellipse = None
         self.best_render = None
-
+        self.debug = debug
+        self.debug_renders = []  # Store debug renders
+        
     def create_camera(self, position, target, up_vector, fovy=60):
         """Create a camera at a specific position looking at a target"""
         position = np.array(position)
@@ -245,15 +247,21 @@ class HoleDetector:
         return img
     
     def detect_hole(self, max_iterations=20, max_optimizations=5):
-        """
-        Detect a circular hole in the segmented object
-        """
+        """Detect a circular hole in the segmented object"""
         print(f"Detecting holes in segmented object...")
         
         # Try different viewpoints
         for i in tqdm(range(max_iterations)):
             camera = self.generate_viewpoint(random_offset=(i > 8), iteration=i)
             render_img = self.render_view(camera)
+            
+            # Save debug render if enabled
+            if self.debug:
+                debug_img = render_img.copy()
+                cv2.putText(debug_img, f"View {i}", (20, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 2)
+                self.debug_renders.append(debug_img)
+            
             ellipse_info = self.detect_ellipse(render_img)
             
             if ellipse_info is not None:
@@ -346,6 +354,18 @@ class HoleDetector:
             os.path.join(self.output_dir, "best_view.png"),
             cv2.cvtColor((output_img * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
         )
+        
+        # Save debug renders if enabled
+        if self.debug and self.debug_renders:
+            debug_dir = os.path.join(self.output_dir, "debug_views")
+            os.makedirs(debug_dir, exist_ok=True)
+            
+            for i, render in enumerate(self.debug_renders):
+                cv2.imwrite(
+                    os.path.join(debug_dir, f"view_{i:03d}.png"),
+                    cv2.cvtColor((render * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+                )
+            print(f"Debug views saved to {debug_dir}")
         
         # Save detection results
         results = {

@@ -8,11 +8,11 @@ def main():
     parser.add_argument("--output", type=str, default="./hole_detection_results", help="Output directory")
     parser.add_argument("--max-iterations", type=int, default=20, help="Maximum number of viewpoints to try")
     parser.add_argument("--max-optimizations", type=int, default=5, help="Maximum optimization steps per viewpoint")
-    
+    parser.add_argument("--debug", action="store_true", help="Save debug renders of all viewpoints")
     args = parser.parse_args()
     
     # Initialize and run detector
-    detector = HoleDetector(args.scene, args.mask, args.output)
+    detector = HoleDetector(args.scene, args.mask, args.output, debug=args.debug)
     results = detector.detect_hole(args.max_iterations, args.max_optimizations)
     
     if results["found"]:
