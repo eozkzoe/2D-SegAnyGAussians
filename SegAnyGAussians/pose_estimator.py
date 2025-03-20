@@ -5,23 +5,76 @@ from scipy.spatial import ConvexHull
 
 class PoseEstimator:
     def __init__(self, gaussians, mask):
+        """
+        Initialize PoseEstimator
+        Args:
+            gaussians: GaussianModel instance
+            mask: Boolean mask for selecting Gaussians
+        """
         self.gaussians = gaussians
+        
+        # Handle different Gaussian representations (SAGA vs 2D-GS)
+        if len(gaussians._xyz.shape) == 1:  # SAGA format (flattened)
+            # Reshape mask if needed
+            if len(mask.shape) == 1 and len(mask) == len(gaussians._xyz) // 3:
+                # Expand mask to match flattened coordinates
+                mask = mask.repeat_interleave(3)
+            elif len(mask.shape) == 1 and len(mask) != len(gaussians._xyz):
+                raise ValueError(f"Mask size {len(mask)} does not match flattened Gaussian size {len(gaussians._xyz)}")
+        else:  # 2D-GS format (N, 3)
+            if len(mask) != len(gaussians._xyz):
+                raise ValueError(f"Mask size {len(mask)} does not match number of Gaussians {len(gaussians._xyz)}")
+        
+        # Convert mask to correct type and device
+        if isinstance(mask, np.ndarray):
+            mask = torch.from_numpy(mask)
+        mask = mask.to(device=gaussians._xyz.device, dtype=torch.bool)
+        
         self.mask = mask
         
     def estimate_pose(self):
         """Estimate pose (position and normal) of segmented Gaussians"""
+        # Validate that we have points selected
+        if not torch.any(self.mask):
+            raise ValueError("No points selected in mask")
+            
         # Get positions
-        xyz = self.gaussians._xyz[self.mask]
+        xyz = self.gaussians._xyz
+        if len(xyz.shape) == 1:  # SAGA format
+            # Reshape to (N, 3)
+            xyz = xyz.reshape(-1, 3)
+            mask_3d = self.mask.reshape(-1, 3)
+            # Take only the first component of each point's mask (they're repeated)
+            mask = mask_3d[:, 0]
+            xyz = xyz[mask]
+        else:  # 2D-GS format
+            xyz = xyz[self.mask]
+            
         points = xyz.detach().cpu().numpy()
         centroid = np.mean(points, axis=0)
         
         # Get normals directly from rotation matrices
-        rotations = self.gaussians.get_rotation[self.mask].detach().cpu().numpy()
-        # For 2D Gaussians, the rotation matrix directly gives us the normal
-        normals = rotations  # Shape should be (N, 3)
+        rotations = self.gaussians.get_rotation
+        if len(rotations.shape) == 1:  # SAGA format
+            rotations = rotations.reshape(-1, 3)
+            mask_3d = self.mask.reshape(-1, 3)
+            mask = mask_3d[:, 0]
+            rotations = rotations[mask]
+        else:  # 2D-GS format
+            rotations = rotations[self.mask]
+            
+        normals = rotations.detach().cpu().numpy()
         
         # Get opacity weights for weighted calculations
-        opacities = self.gaussians.get_opacity[self.mask].detach().cpu().numpy()
+        opacities = self.gaussians.get_opacity
+        if len(opacities.shape) == 1 and len(xyz.shape) == 1:  # SAGA format
+            opacities = opacities.reshape(-1, 1)
+            mask_1d = self.mask.reshape(-1, 3)[:, 0]
+            opacities = opacities[mask_1d]
+        else:  # 2D-GS format
+            opacities = opacities[self.mask]
+            
+        opacities = opacities.detach().cpu().numpy()
         weights = opacities / opacities.sum()
         
         # Calculate weighted centroid and normal
@@ -83,16 +136,6 @@ class PoseEstimator:
         
     def get_mean_normal(self):
         """Get the mean normal direction of segmented Gaussians, weighted by opacity"""
-        # Get normals directly from rotation matrices
-        normals = self.gaussians.get_rotation[self.mask].detach().cpu().numpy()
-        opacities = self.gaussians.get_opacity[self.mask].detach().cpu().numpy()
-        
-        # Weight normals by opacity
-        weights = opacities / opacities.sum()
-        # Compute weighted normal directly to avoid memory issues
-        weighted_normal = np.zeros(3)
-        for i in range(len(normals)):
-            weighted_normal += normals[i] * weights[i]
-        weighted_normal = weighted_normal / np.linalg.norm(weighted_normal)
-        
-        return weighted_normal
+        # Use estimate_pose to handle different formats consistently
+        pose = self.estimate_pose()
+        return pose['normal']
