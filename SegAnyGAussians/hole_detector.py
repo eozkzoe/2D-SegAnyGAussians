@@ -29,7 +29,7 @@ class HoleDetector:
             self.mask = ~self.mask
         
         # Get scene bounds for camera placement
-        self.xyz = self.gaussian_model.get_xyz
+        self.xyz = self.gaussian_model.get_xyz.detach()  # Add detach() here
         self.center = self.xyz.mean(dim=0)
         self.scale = (self.xyz.max(dim=0).values - self.xyz.min(dim=0).values).max()
         
@@ -88,7 +88,7 @@ class HoleDetector:
     def generate_viewpoint(self, random_offset=True, iteration=0):
         """Generate a camera viewpoint looking at the scene center"""
         # Calculate distance based on scene scale
-        distance = self.scale * 2.0
+        distance = float(self.scale.cpu())  # Convert to float
         
         if iteration == 0 and not random_offset:
             # First try: look along Z axis
@@ -117,7 +117,7 @@ class HoleDetector:
                 )
                 up_vector = np.array([0, 1, 0])
         
-        return self.create_camera(camera_pos.cpu().numpy(), self.center.cpu().numpy(), up_vector)
+        return self.create_camera(camera_pos.detach().cpu().numpy(), self.center.detach().cpu().numpy(), up_vector)
     
     def detect_ellipse(self, image):
         """Detect ellipses in the rendered image"""
