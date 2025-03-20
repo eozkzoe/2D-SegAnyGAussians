@@ -3,27 +3,16 @@ import torch
 import numpy as np
 import cv2
 import json
-import math
-import argparse
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
-from scene import GaussianModel, Scene
+from scene import GaussianModel
 from gaussian_renderer import render
 from scene.cameras import Camera
 from utils.graphics_utils import focal2fov, fov2focal
-from pose_estimator import PoseEstimator
 
 class HoleDetector:
     def __init__(self, scene_path, mask_path, output_dir="./hole_detection_results"):
-        """
-        Initialize the hole detector with paths to the scene and mask
-        
-        Args:
-            scene_path: Path to the 3DGS scene point cloud
-            mask_path: Path to the precomputed segmentation mask
-            output_dir: Directory to save results
-        """
         self.scene_path = scene_path
         self.mask_path = mask_path
         self.output_dir = output_dir
@@ -38,11 +27,11 @@ class HoleDetector:
         if torch.count_nonzero(self.mask) == 0:
             print("Mask is empty, inverting mask")
             self.mask = ~self.mask
-            
-        # Initialize pose estimator to get object properties
-        self.pose_estimator = PoseEstimator(self.gaussian_model, self.mask)
-        self.pose = self.pose_estimator.estimate_pose()
-        self.bbox = self.pose_estimator.get_oriented_bbox()
+        
+        # Get scene bounds for camera placement
+        self.xyz = self.gaussian_model.get_xyz
+        self.center = self.xyz.mean(dim=0)
+        self.scale = (self.xyz.max(dim=0).values - self.xyz.min(dim=0).values).max()
         
         # Rendering parameters
         self.width = 800
@@ -50,11 +39,11 @@ class HoleDetector:
         self.bg_color = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
         
         # Optimization parameters
-        self.best_circularity = 0.0  # Higher is better (1.0 is perfect circle)
+        self.best_circularity = 0.0
         self.best_camera = None
         self.best_ellipse = None
         self.best_render = None
-        
+
     def create_camera(self, position, target, up_vector, fovy=60):
         """Create a camera at a specific position looking at a target"""
         position = np.array(position)
@@ -97,41 +86,38 @@ class HoleDetector:
         return cam
     
     def generate_viewpoint(self, random_offset=True, iteration=0):
-        """Generate a camera viewpoint looking at the object centroid"""
-        centroid = self.pose["centroid"]
-        normal = self.pose["normal"]
-        
-        # Calculate distance based on object size
-        dimensions = self.bbox["dimensions"]
-        distance = max(dimensions) * 2.0
+        """Generate a camera viewpoint looking at the scene center"""
+        # Calculate distance based on scene scale
+        distance = self.scale * 2.0
         
         if iteration == 0 and not random_offset:
-            # First try: look directly along the normal vector
-            camera_pos = centroid - normal * distance
-            up_vector = np.array([0, 1, 0]) if abs(normal[1]) < 0.9 else np.array([0, 0, 1])
+            # First try: look along Z axis
+            camera_pos = self.center + torch.tensor([0, 0, distance], device="cuda")
+            up_vector = np.array([0, 1, 0])
         else:
             # Random viewpoint around the object
             if random_offset:
-                # Generate random spherical coordinates
-                theta = np.random.uniform(0, 2 * np.pi)  # Azimuthal angle
-                phi = np.random.uniform(0, np.pi)  # Polar angle
+                theta = np.random.uniform(0, 2 * np.pi)
+                phi = np.random.uniform(0, np.pi)
                 
-                # Convert to Cartesian coordinates
                 x = distance * np.sin(phi) * np.cos(theta)
                 y = distance * np.sin(phi) * np.sin(theta)
                 z = distance * np.cos(phi)
                 
-                camera_pos = centroid + np.array([x, y, z])
+                camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
                 up_vector = np.array([0, 1, 0])
             else:
-                # Systematic exploration around the normal direction
-                angle = (iteration / 8) * 2 * np.pi  # Divide circle into 8 parts
+                # Systematic exploration around Z axis
+                angle = (iteration / 8) * 2 * np.pi
                 rotation = R.from_rotvec(angle * np.array([0, 1, 0]))
-                offset_dir = rotation.apply(np.cross(normal, np.array([0, 1, 0]) if abs(normal[1]) < 0.9 else np.array([1, 0, 0])))
-                camera_pos = centroid - normal * distance * 0.8 + offset_dir * distance * 0.6
+                offset_dir = rotation.apply(np.array([1, 0, 0]))
+                camera_pos = self.center + torch.tensor(
+                    offset_dir * distance * 0.6 + np.array([0, 0, distance * 0.8]), 
+                    device="cuda"
+                )
                 up_vector = np.array([0, 1, 0])
         
-        return self.create_camera(camera_pos, centroid, up_vector)
+        return self.create_camera(camera_pos.cpu().numpy(), self.center.cpu().numpy(), up_vector)
     
     def detect_ellipse(self, image):
         """Detect ellipses in the rendered image"""
@@ -261,25 +247,13 @@ class HoleDetector:
     def detect_hole(self, max_iterations=20, max_optimizations=5):
         """
         Detect a circular hole in the segmented object
-        
-        Args:
-            max_iterations: Maximum number of random viewpoints to try
-            max_optimizations: Maximum number of optimization steps per viewpoint
-        
-        Returns:
-            Dictionary with hole information if found, None otherwise
         """
         print(f"Detecting holes in segmented object...")
         
-        # Try random viewpoints
+        # Try different viewpoints
         for i in tqdm(range(max_iterations)):
-            # Generate viewpoint (first try normal direction, then random)
             camera = self.generate_viewpoint(random_offset=(i > 8), iteration=i)
-            
-            # Render view
             render_img = self.render_view(camera)
-            
-            # Detect ellipse
             ellipse_info = self.detect_ellipse(render_img)
             
             if ellipse_info is not None:
@@ -346,7 +320,7 @@ class HoleDetector:
                 "width": self.best_ellipse["width"],
                 "height": self.best_ellipse["height"],
                 "camera_position": -np.linalg.inv(self.best_camera.R) @ self.best_camera.T,
-                "camera_direction": self.pose["centroid"] - (-np.linalg.inv(self.best_camera.R) @ self.best_camera.T)
+                "camera_direction": self.center.cpu().numpy() - (-np.linalg.inv(self.best_camera.R) @ self.best_camera.T)
             }
         else:
             return {"found": False}
