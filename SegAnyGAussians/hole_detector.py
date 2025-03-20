@@ -247,7 +247,6 @@ class HoleDetector:
         return img
     
     def detect_hole(self, max_iterations=20, max_optimizations=5):
-        """Detect a circular hole in the segmented object"""
         print(f"Detecting holes in segmented object...")
         
         # Try different viewpoints
@@ -258,8 +257,25 @@ class HoleDetector:
             # Save debug render if enabled
             if self.debug:
                 debug_img = render_img.copy()
-                cv2.putText(debug_img, f"View {i}", (20, 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 2)
+                # Draw view number in white with black outline for visibility
+                cv2.putText(debug_img, f"View {i}", (20, 40), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
+                cv2.putText(debug_img, f"View {i}", (20, 40), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 1)
+                
+                # If ellipse is detected, draw it on debug view
+                ellipse_info = self.detect_ellipse(render_img)
+                if ellipse_info is not None:
+                    cv2.ellipse(
+                        (debug_img * 255).astype(np.uint8),
+                        ellipse_info["ellipse"],
+                        (0, 255, 0),
+                        2
+                    )
+                    debug_img = debug_img.astype(np.float32) / 255.0
+                    cv2.putText(debug_img, f"Circularity: {ellipse_info['circularity']:.3f}", 
+                               (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 1, 0), 2)
+                
                 self.debug_renders.append(debug_img)
             
             ellipse_info = self.detect_ellipse(render_img)
