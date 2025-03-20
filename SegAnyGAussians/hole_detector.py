@@ -27,17 +27,20 @@ class HoleDetector:
 
         # Load scene cameras
         scene_dir = os.path.dirname(scene_path)
+        print(scene_dir)
         self.cameras = []
         cameras_dir = os.path.join(scene_dir, "cameras")
         if os.path.exists(cameras_dir):
-            camera_files = sorted([f for f in os.listdir(cameras_dir) if f.endswith('.bin')])
+            camera_files = sorted(
+                [f for f in os.listdir(cameras_dir) if f.endswith(".bin")]
+            )
             for cam_file in camera_files:
                 cam_path = os.path.join(cameras_dir, cam_file)
                 camera = Camera.load(cam_path)
                 camera.image = torch.zeros([3, self.height, self.width])
                 camera.feature_height, camera.feature_width = self.height, self.width
                 self.cameras.append(camera)
-        
+
         if not self.cameras:
             print("Warning: No scene cameras found, will use generated viewpoints only")
 
@@ -110,7 +113,7 @@ class HoleDetector:
         cam.feature_height, cam.feature_width = self.height, self.width
         return cam
 
-    def generate_viewpoint(self, random_offset=True, iteration=0):
+    def generate_viewpoint(self, random_offset=True, iteration=0, max_iterations=20):
         """Generate a camera viewpoint looking at the scene center"""
         # Use the 80th percentile radius instead of max scale
         distance = float(self.radius.cpu()) * 2.0  # Multiply by 2 for better visibility
@@ -299,20 +302,36 @@ class HoleDetector:
             print("Trying existing scene cameras...")
             for i, camera in enumerate(tqdm(self.cameras)):
                 render_img = self.render_view(camera)
-                
+
                 # Save debug render if enabled
                 if self.debug:
                     debug_img = render_img.copy()
-                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
-                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 1)
+                    cv2.putText(
+                        debug_img,
+                        f"Scene View {i}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 0, 0),
+                        3,
+                    )
+                    cv2.putText(
+                        debug_img,
+                        f"Scene View {i}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (1, 1, 1),
+                        1,
+                    )
                     self.debug_renders.append(debug_img)
 
                 ellipse_info = self.detect_ellipse(render_img)
                 if ellipse_info is not None:
-                    print(f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}")
-                    self.best_circularity = ellipse_info['circularity']
+                    print(
+                        f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}"
+                    )
+                    self.best_circularity = ellipse_info["circularity"]
                     self.best_camera = camera
                     self.best_ellipse = ellipse_info
                     self.best_render = render_img
@@ -323,7 +342,9 @@ class HoleDetector:
             print("Trying generated viewpoints...")
             # Try different viewpoints
             for i in tqdm(range(max_iterations)):
-                camera = self.generate_viewpoint(random_offset=(i > 8), iteration=i)
+                camera = self.generate_viewpoint(
+                    random_offset=(i > 8), iteration=i, max_iterations=max_iterations
+                )
                 render_img = self.render_view(camera)
 
                 # Save debug render if enabled
@@ -429,9 +450,9 @@ class HoleDetector:
                         # No improvement, stop optimizing
                         break
 
-                # If we found a very good circle, stop early
-                if self.best_circularity > 0.95:
-                    break
+                    # If we found a very good circle, stop early
+                    if self.best_circularity > 0.95:
+                        break
 
         # Save debug renders if enabled
         if self.debug and self.debug_renders:
