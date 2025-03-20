@@ -94,7 +94,7 @@ class HoleDetector:
         cam.feature_height, cam.feature_width = self.height, self.width
         return cam
 
-    def generate_viewpoint(self, random_offset=True, iteration=0):
+    def generate_viewpoint(self, random_offset=True, iteration=0, max_iterations=20):
         """Generate a camera viewpoint looking at the scene center"""
         # Use the 80th percentile radius instead of max scale
         distance = float(self.radius.cpu()) * 2.0  # Multiply by 2 for better visibility
@@ -102,7 +102,6 @@ class HoleDetector:
         if iteration == 0 and not random_offset:
             # First try: look along Z axis
             camera_pos = self.center + torch.tensor([0, 0, distance], device="cuda")
-            up_vector = np.array([0, 1, 0])
         else:
             # Random viewpoint around the object
             if random_offset:
@@ -111,29 +110,41 @@ class HoleDetector:
                 i = iteration + np.random.uniform(-0.5, 0.5)  # Add some randomness
                 theta = 2 * np.pi * i / golden_ratio
                 phi = np.arccos(1 - 2 * (i + 0.5) / max_iterations)
-
-                x = distance * np.sin(phi) * np.cos(theta)
-                y = distance * np.sin(phi) * np.sin(theta)
-                z = distance * np.cos(phi)
-
-                camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
-                up_vector = np.array([0, 1, 0])
             else:
                 # Systematic exploration around Z axis at 45-degree elevation
                 angle = (iteration / 8) * 2 * np.pi
                 phi = np.pi / 4  # 45-degree elevation
+                theta = angle
 
-                x = distance * np.sin(phi) * np.cos(angle)
-                y = distance * np.sin(phi) * np.sin(angle)
-                z = distance * np.cos(phi)
+            x = distance * np.sin(phi) * np.cos(theta)
+            y = distance * np.sin(phi) * np.sin(theta)
+            z = distance * np.cos(phi)
+            
+            camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
 
-                camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
-                up_vector = np.array([0, 1, 0])
+        # Calculate up vector based on camera position
+        cam_pos_np = camera_pos.detach().cpu().numpy()
+        center_np = self.center.detach().cpu().numpy()
+        
+        # Calculate forward vector (from camera to center)
+        forward = center_np - cam_pos_np
+        forward = forward / np.linalg.norm(forward)
+        
+        # Calculate up vector (try to keep it vertical when possible)
+        world_up = np.array([0, 1, 0])
+        right = np.cross(forward, world_up)
+        if np.linalg.norm(right) < 1e-6:
+            # If camera is looking straight up/down, use a different reference
+            world_up = np.array([0, 0, 1])
+            right = np.cross(forward, world_up)
+        right = right / np.linalg.norm(right)
+        up = np.cross(right, forward)
+        up = up / np.linalg.norm(up)
 
         return self.create_camera(
             camera_pos.detach().cpu().numpy(),
             self.center.detach().cpu().numpy(),
-            up_vector,
+            up
         )
 
     def detect_ellipse(self, image):
