@@ -32,8 +32,12 @@ class HoleDetector:
             self.mask = ~self.mask
 
         # Get scene bounds for camera placement
-        self.xyz = self.gaussian_model.get_xyz.detach()  # Add detach() here
+        self.xyz = self.gaussian_model.get_xyz.detach()
         self.center = self.xyz.mean(dim=0)
+        
+        # Calculate radius that encompasses 80% of points
+        distances = torch.norm(self.xyz - self.center.unsqueeze(0), dim=1)
+        self.radius = torch.quantile(distances, 0.8)  # 80th percentile
         self.scale = (self.xyz.max(dim=0).values - self.xyz.min(dim=0).values).max()
 
         # Rendering parameters
@@ -92,8 +96,8 @@ class HoleDetector:
 
     def generate_viewpoint(self, random_offset=True, iteration=0):
         """Generate a camera viewpoint looking at the scene center"""
-        # Calculate distance based on scene scale
-        distance = float(self.scale.cpu())  # Convert to float
+        # Use the 80th percentile radius instead of max scale
+        distance = float(self.radius.cpu()) * 2.0  # Multiply by 2 for better visibility
 
         if iteration == 0 and not random_offset:
             # First try: look along Z axis
@@ -102,24 +106,28 @@ class HoleDetector:
         else:
             # Random viewpoint around the object
             if random_offset:
-                theta = np.random.uniform(0, 2 * np.pi)
-                phi = np.random.uniform(0, np.pi)
-
+                # Generate points on unit sphere using fibonacci spiral
+                golden_ratio = (1 + 5**0.5) / 2
+                i = iteration + np.random.uniform(-0.5, 0.5)  # Add some randomness
+                theta = 2 * np.pi * i / golden_ratio
+                phi = np.arccos(1 - 2 * (i + 0.5) / max_iterations)
+                
                 x = distance * np.sin(phi) * np.cos(theta)
                 y = distance * np.sin(phi) * np.sin(theta)
                 z = distance * np.cos(phi)
-
+                
                 camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
                 up_vector = np.array([0, 1, 0])
             else:
-                # Systematic exploration around Z axis
+                # Systematic exploration around Z axis at 45-degree elevation
                 angle = (iteration / 8) * 2 * np.pi
-                rotation = R.from_rotvec(angle * np.array([0, 1, 0]))
-                offset_dir = rotation.apply(np.array([1, 0, 0]))
-                camera_pos = self.center + torch.tensor(
-                    offset_dir * distance * 0.6 + np.array([0, 0, distance * 0.8]),
-                    device="cuda",
-                )
+                phi = np.pi / 4  # 45-degree elevation
+                
+                x = distance * np.sin(phi) * np.cos(angle)
+                y = distance * np.sin(phi) * np.sin(angle)
+                z = distance * np.cos(phi)
+                
+                camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
                 up_vector = np.array([0, 1, 0])
 
         return self.create_camera(
