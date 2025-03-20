@@ -21,26 +21,30 @@ class HoleDetector:
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-        # Load the scene
+        # Rendering parameters
+        self.width = 800
+        self.height = 800
+        self.bg_color = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
+
+        # Load the scene and cameras
+        class DummyArgs:
+            def __init__(self):
+                self.source_path = os.path.dirname(scene_path)
+                self.model_path = os.path.dirname(scene_path)
+                self.images = "images"
+                self.eval = False
+                self.sh_degree = 3
+                self.white_background = False
+                self.feature_dim = 256
+                self.load_iteration = -1
+
+        args = DummyArgs()
         self.gaussian_model = GaussianModel(3)  # sh_degree=3
         self.gaussian_model.load_ply(scene_path)
-
-        # Load scene cameras
-        scene_dir = os.path.dirname(scene_path)
-        print(scene_dir)
-        self.cameras = []
-        cameras_dir = os.path.join(scene_dir, "cameras")
-        if os.path.exists(cameras_dir):
-            camera_files = sorted(
-                [f for f in os.listdir(cameras_dir) if f.endswith(".bin")]
-            )
-            for cam_file in camera_files:
-                cam_path = os.path.join(cameras_dir, cam_file)
-                camera = Camera.load(cam_path)
-                camera.image = torch.zeros([3, self.height, self.width])
-                camera.feature_height, camera.feature_width = self.height, self.width
-                self.cameras.append(camera)
-
+        scene = Scene(args, self.gaussian_model, None, load_iteration=-1, shuffle=False)
+        
+        # Get cameras from scene
+        self.cameras = scene.getTrainCameras()
         if not self.cameras:
             print("Warning: No scene cameras found, will use generated viewpoints only")
 
@@ -58,11 +62,6 @@ class HoleDetector:
         distances = torch.norm(self.xyz - self.center.unsqueeze(0), dim=1)
         self.radius = torch.quantile(distances, 0.8)  # 80th percentile
         self.scale = (self.xyz.max(dim=0).values - self.xyz.min(dim=0).values).max()
-
-        # Rendering parameters
-        self.width = 800
-        self.height = 800
-        self.bg_color = torch.tensor([0, 0, 0], dtype=torch.float32, device="cuda")
 
         # Optimization parameters
         self.best_circularity = 0.0
