@@ -3,7 +3,8 @@ from hole_detector import HoleDetector
 
 def main():
     parser = argparse.ArgumentParser(description="Detect circular holes in segmented 3DGS objects")
-    parser.add_argument("--scene", type=str, required=True, help="Path to the 3DGS scene point cloud")
+    parser.add_argument("--scene", type=str, required=True, help="Path to the COLMAP scene directory")
+    parser.add_argument("--model", type=str, required=True, help="Path to the pre-trained 3DGS model directory")
     parser.add_argument("--mask", type=str, required=True, help="Path to the segmentation mask")
     parser.add_argument("--output", type=str, default="./hole_detection_results", help="Output directory")
     parser.add_argument("--max-iterations", type=int, default=20, help="Maximum number of viewpoints to try")
@@ -12,7 +13,7 @@ def main():
     args = parser.parse_args()
     
     # Initialize and run detector
-    detector = HoleDetector(args.scene, args.mask, args.output, debug=args.debug)
+    detector = HoleDetector(args.scene, args.model, args.mask, args.output, debug=args.debug)
     results = detector.detect_hole(args.max_iterations, args.max_optimizations)
     
     if results["found"]:
