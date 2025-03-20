@@ -34,7 +34,7 @@ class HoleDetector:
         # Get scene bounds for camera placement
         self.xyz = self.gaussian_model.get_xyz.detach()
         self.center = self.xyz.mean(dim=0)
-        
+
         # Calculate radius that encompasses 80% of points
         distances = torch.norm(self.xyz - self.center.unsqueeze(0), dim=1)
         self.radius = torch.quantile(distances, 0.8)  # 80th percentile
@@ -111,22 +111,22 @@ class HoleDetector:
                 i = iteration + np.random.uniform(-0.5, 0.5)  # Add some randomness
                 theta = 2 * np.pi * i / golden_ratio
                 phi = np.arccos(1 - 2 * (i + 0.5) / max_iterations)
-                
+
                 x = distance * np.sin(phi) * np.cos(theta)
                 y = distance * np.sin(phi) * np.sin(theta)
                 z = distance * np.cos(phi)
-                
+
                 camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
                 up_vector = np.array([0, 1, 0])
             else:
                 # Systematic exploration around Z axis at 45-degree elevation
                 angle = (iteration / 8) * 2 * np.pi
                 phi = np.pi / 4  # 45-degree elevation
-                
+
                 x = distance * np.sin(phi) * np.cos(angle)
                 y = distance * np.sin(phi) * np.sin(angle)
                 z = distance * np.cos(phi)
-                
+
                 camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
                 up_vector = np.array([0, 1, 0])
 
@@ -390,6 +390,18 @@ class HoleDetector:
                 if self.best_circularity > 0.95:
                     break
 
+        # Save debug renders if enabled
+        if self.debug and self.debug_renders:
+            debug_dir = os.path.join(self.output_dir, "debug_views")
+            os.makedirs(debug_dir, exist_ok=True)
+
+            for i, render in enumerate(self.debug_renders):
+                cv2.imwrite(
+                    os.path.join(debug_dir, f"view_{i:03d}.png"),
+                    cv2.cvtColor((render * 255).astype(np.uint8), cv2.COLOR_RGB2BGR),
+                )
+            print(f"Debug views saved to {debug_dir}")
+
         # Save results
         if self.best_ellipse is not None:
             self.save_results()
@@ -428,18 +440,6 @@ class HoleDetector:
             os.path.join(self.output_dir, "best_view.png"),
             cv2.cvtColor((output_img * 255).astype(np.uint8), cv2.COLOR_RGB2BGR),
         )
-
-        # Save debug renders if enabled
-        if self.debug and self.debug_renders:
-            debug_dir = os.path.join(self.output_dir, "debug_views")
-            os.makedirs(debug_dir, exist_ok=True)
-
-            for i, render in enumerate(self.debug_renders):
-                cv2.imwrite(
-                    os.path.join(debug_dir, f"view_{i:03d}.png"),
-                    cv2.cvtColor((render * 255).astype(np.uint8), cv2.COLOR_RGB2BGR),
-                )
-            print(f"Debug views saved to {debug_dir}")
 
         # Save detection results
         results = {
