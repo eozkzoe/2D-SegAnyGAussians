@@ -14,10 +14,8 @@ from utils.graphics_utils import focal2fov, fov2focal
 
 class HoleDetector:
     def __init__(
-        self, scene_path, mask_path, output_dir="./hole_detection_results", debug=False
+        self, scene_path, model_path, mask_path, output_dir="./hole_detection_results", debug=False
     ):
-        self.scene_path = scene_path
-        self.mask_path = mask_path
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
@@ -29,8 +27,8 @@ class HoleDetector:
         # Load the scene and cameras
         class DummyArgs:
             def __init__(self):
-                self.source_path = os.path.dirname(scene_path)
-                self.model_path = os.path.dirname(scene_path)
+                self.source_path = scene_path  # COLMAP directory
+                self.model_path = model_path   # Pre-trained model directory
                 self.images = "images"
                 self.eval = False
                 self.sh_degree = 3
@@ -40,7 +38,7 @@ class HoleDetector:
 
         args = DummyArgs()
         self.gaussian_model = GaussianModel(3)  # sh_degree=3
-        self.gaussian_model.load_ply(scene_path)
+        self.gaussian_model.load_ply(os.path.join(model_path, "point_cloud.ply"))
         scene = Scene(args, self.gaussian_model, None, load_iteration=-1, shuffle=False)
         
         # Get cameras from scene
