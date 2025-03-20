@@ -25,6 +25,22 @@ class HoleDetector:
         self.gaussian_model = GaussianModel(3)  # sh_degree=3
         self.gaussian_model.load_ply(scene_path)
 
+        # Load scene cameras
+        scene_dir = os.path.dirname(scene_path)
+        self.cameras = []
+        cameras_dir = os.path.join(scene_dir, "cameras")
+        if os.path.exists(cameras_dir):
+            camera_files = sorted([f for f in os.listdir(cameras_dir) if f.endswith('.bin')])
+            for cam_file in camera_files:
+                cam_path = os.path.join(cameras_dir, cam_file)
+                camera = Camera.load(cam_path)
+                camera.image = torch.zeros([3, self.height, self.width])
+                camera.feature_height, camera.feature_width = self.height, self.width
+                self.cameras.append(camera)
+        
+        if not self.cameras:
+            print("Warning: No scene cameras found, will use generated viewpoints only")
+
         # Load the mask
         self.mask = torch.load(mask_path)
         if torch.count_nonzero(self.mask) == 0:
@@ -94,7 +110,7 @@ class HoleDetector:
         cam.feature_height, cam.feature_width = self.height, self.width
         return cam
 
-    def generate_viewpoint(self, random_offset=True, iteration=0, max_iterations=20):
+    def generate_viewpoint(self, random_offset=True, iteration=0):
         """Generate a camera viewpoint looking at the scene center"""
         # Use the 80th percentile radius instead of max scale
         distance = float(self.radius.cpu()) * 2.0  # Multiply by 2 for better visibility
@@ -102,6 +118,7 @@ class HoleDetector:
         if iteration == 0 and not random_offset:
             # First try: look along Z axis
             camera_pos = self.center + torch.tensor([0, 0, distance], device="cuda")
+            up_vector = np.array([0, 1, 0])
         else:
             # Random viewpoint around the object
             if random_offset:
@@ -110,41 +127,29 @@ class HoleDetector:
                 i = iteration + np.random.uniform(-0.5, 0.5)  # Add some randomness
                 theta = 2 * np.pi * i / golden_ratio
                 phi = np.arccos(1 - 2 * (i + 0.5) / max_iterations)
+
+                x = distance * np.sin(phi) * np.cos(theta)
+                y = distance * np.sin(phi) * np.sin(theta)
+                z = distance * np.cos(phi)
+
+                camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
+                up_vector = np.array([0, 1, 0])
             else:
                 # Systematic exploration around Z axis at 45-degree elevation
                 angle = (iteration / 8) * 2 * np.pi
                 phi = np.pi / 4  # 45-degree elevation
-                theta = angle
 
-            x = distance * np.sin(phi) * np.cos(theta)
-            y = distance * np.sin(phi) * np.sin(theta)
-            z = distance * np.cos(phi)
-            
-            camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
+                x = distance * np.sin(phi) * np.cos(angle)
+                y = distance * np.sin(phi) * np.sin(angle)
+                z = distance * np.cos(phi)
 
-        # Calculate up vector based on camera position
-        cam_pos_np = camera_pos.detach().cpu().numpy()
-        center_np = self.center.detach().cpu().numpy()
-        
-        # Calculate forward vector (from camera to center)
-        forward = center_np - cam_pos_np
-        forward = forward / np.linalg.norm(forward)
-        
-        # Calculate up vector (try to keep it vertical when possible)
-        world_up = np.array([0, 1, 0])
-        right = np.cross(forward, world_up)
-        if np.linalg.norm(right) < 1e-6:
-            # If camera is looking straight up/down, use a different reference
-            world_up = np.array([0, 0, 1])
-            right = np.cross(forward, world_up)
-        right = right / np.linalg.norm(right)
-        up = np.cross(right, forward)
-        up = up / np.linalg.norm(up)
+                camera_pos = self.center + torch.tensor([x, y, z], device="cuda")
+                up_vector = np.array([0, 1, 0])
 
         return self.create_camera(
             camera_pos.detach().cpu().numpy(),
             self.center.detach().cpu().numpy(),
-            up
+            up_vector,
         )
 
     def detect_ellipse(self, image):
@@ -289,33 +294,60 @@ class HoleDetector:
     def detect_hole(self, max_iterations=20, max_optimizations=5):
         print(f"Detecting holes in segmented object...")
 
-        # Try different viewpoints
-        for i in tqdm(range(max_iterations)):
-            camera = self.generate_viewpoint(random_offset=(i > 8), iteration=i)
-            render_img = self.render_view(camera)
+        # First try existing scene cameras
+        if self.cameras:
+            print("Trying existing scene cameras...")
+            for i, camera in enumerate(tqdm(self.cameras)):
+                render_img = self.render_view(camera)
+                
+                # Save debug render if enabled
+                if self.debug:
+                    debug_img = render_img.copy()
+                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
+                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 1)
+                    self.debug_renders.append(debug_img)
 
-            # Save debug render if enabled
-            if self.debug:
-                debug_img = render_img.copy()
-                # Draw view number in white with black outline for visibility
-                cv2.putText(
-                    debug_img,
-                    f"View {i}",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (0, 0, 0),
-                    3,
-                )
-                cv2.putText(
-                    debug_img,
-                    f"View {i}",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1,
-                    (1, 1, 1),
-                    1,
-                )
+                ellipse_info = self.detect_ellipse(render_img)
+                if ellipse_info is not None:
+                    print(f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}")
+                    self.best_circularity = ellipse_info['circularity']
+                    self.best_camera = camera
+                    self.best_ellipse = ellipse_info
+                    self.best_render = render_img
+                    break
+
+        # If no hole found or not circular enough, try generated viewpoints
+        if self.best_circularity < 0.8:
+            print("Trying generated viewpoints...")
+            # Try different viewpoints
+            for i in tqdm(range(max_iterations)):
+                camera = self.generate_viewpoint(random_offset=(i > 8), iteration=i)
+                render_img = self.render_view(camera)
+
+                # Save debug render if enabled
+                if self.debug:
+                    debug_img = render_img.copy()
+                    # Draw view number in white with black outline for visibility
+                    cv2.putText(
+                        debug_img,
+                        f"View {i}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 0, 0),
+                        3,
+                    )
+                    cv2.putText(
+                        debug_img,
+                        f"View {i}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (1, 1, 1),
+                        1,
+                    )
 
                 # If ellipse is detected, draw it on debug view
                 ellipse_info = self.detect_ellipse(render_img)
