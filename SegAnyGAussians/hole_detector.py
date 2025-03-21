@@ -200,12 +200,17 @@ class HoleDetector:
             debug_img = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
             
             circles = np.uint16(np.around(circles))
-            # Draw all detected circles
+            # Draw all detected circles as ellipses
             for circle in circles[0, :]:
                 x, y, r = circle
-                # Draw the outer circle
-                cv2.circle(debug_img, (x, y), r, (0, 255, 0), 2)
-                # Draw the center of the circle
+                # Draw the ellipse (circle is just an ellipse with equal axes)
+                cv2.ellipse(
+                    debug_img,
+                    ((x, y), (r * 2, r * 2), 0),  # center, (width, height), angle
+                    (0, 255, 0),  # Green color
+                    2  # Line thickness
+                )
+                # Draw the center point
                 cv2.circle(debug_img, (x, y), 2, (0, 0, 255), 3)
             
             # Save the debug image
