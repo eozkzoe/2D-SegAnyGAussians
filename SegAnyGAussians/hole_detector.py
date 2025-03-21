@@ -228,12 +228,8 @@ class HoleDetector:
 
         # Get camera parameters
         cam_pos = -np.linalg.inv(camera.R) @ camera.T
-        cam_dir = self.pose["centroid"] - cam_pos
+        cam_dir = self.center.cpu().numpy() - cam_pos
         cam_dir = cam_dir / np.linalg.norm(cam_dir)
-
-        # Calculate the major axis direction of the ellipse
-        major_axis_angle = angle * np.pi / 180.0
-        major_axis = np.array([np.cos(major_axis_angle), np.sin(major_axis_angle), 0])
 
         # Calculate a new camera position that's more aligned with the hole normal
         # Move in the direction perpendicular to the major axis
@@ -245,7 +241,7 @@ class HoleDetector:
 
         # Create a new camera
         return self.create_camera(
-            new_cam_pos, self.pose["centroid"], np.array([0, 1, 0])
+            new_cam_pos, self.center.cpu().numpy(), np.array([0, 1, 0])
         )
 
     def render_view(self, camera):
