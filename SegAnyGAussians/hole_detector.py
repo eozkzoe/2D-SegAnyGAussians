@@ -488,6 +488,10 @@ class HoleDetector:
             cv2.cvtColor((output_img * 255).astype(np.uint8), cv2.COLOR_RGB2BGR),
         )
 
+        # Get camera position and direction
+        camera_position = -np.linalg.inv(self.best_camera.R) @ self.best_camera.T
+        camera_direction = self.center.cpu().numpy() - camera_position
+
         # Save detection results
         results = {
             "circularity": float(self.best_circularity),
@@ -498,19 +502,13 @@ class HoleDetector:
                 "angle": float(self.best_ellipse["angle"]),
             },
             "camera": {
-                "position": (
-                    -np.linalg.inv(self.best_camera.R) @ self.best_camera.T
-                ).tolist(),
-                "direction": (
-                    self.pose["centroid"]
-                    - (-np.linalg.inv(self.best_camera.R) @ self.best_camera.T)
-                ).tolist(),
+                "position": camera_position.tolist(),
+                "direction": camera_direction.tolist(),
                 "up": self.best_camera.R[:, 1].tolist(),
             },
             "object": {
-                "centroid": self.pose["centroid"].tolist(),
-                "normal": self.pose["normal"].tolist(),
-                "bbox_dimensions": self.bbox["dimensions"].tolist(),
+                "centroid": self.center.cpu().numpy().tolist(),
+                "bbox_dimensions": (self.xyz.max(dim=0).values - self.xyz.min(dim=0).values).cpu().numpy().tolist(),
             },
         }
 
