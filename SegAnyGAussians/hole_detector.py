@@ -165,7 +165,7 @@ class HoleDetector:
         )
 
     def detect_ellipse(self, image):
-        """Detect ellipses in the rendered image"""
+        """Detect circular holes in the rendered image using Hough Circles"""
         # Convert to grayscale
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
@@ -177,71 +177,44 @@ class HoleDetector:
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
-        # Find contours
-        contours, _ = cv2.findContours(
-            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        # Invert the image to detect holes (dark circles)
+        binary_inv = cv2.bitwise_not(binary)
+
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(binary_inv, (9, 9), 2)
+
+        # Detect circles using Hough Circle Transform
+        circles = cv2.HoughCircles(
+            blurred,
+            cv2.HOUGH_GRADIENT,
+            dp=1,
+            minDist=50,
+            param1=50,
+            param2=30,
+            minRadius=20,
+            maxRadius=int(min(self.width, self.height) // 4),
         )
 
-        # Sort contours by area (largest first)
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            # Get the most prominent circle (usually the first one)
+            x, y, r = circles[0][0]
 
-        # Look for holes (contours with holes inside)
-        for contour in contours:
-            # Check if contour is large enough
-            area = cv2.contourArea(contour)
-            if area < 100:  # Skip tiny contours
-                continue
+            # Calculate circularity (for compatibility with existing code)
+            # In this case, it's always 1.0 since we're detecting perfect circles
+            circularity = 1.0
 
-            # Create a mask for this contour
-            mask = np.zeros_like(binary)
-            cv2.drawContours(mask, [contour], 0, 255, -1)
+            return {
+                "ellipse": ((float(x), float(y)), (float(r * 2), float(r * 2)), 0),
+                "circularity": circularity,
+                "center": (float(x), float(y)),
+                "width": float(r * 2),
+                "height": float(r * 2),
+                "angle": 0.0,
+                "radius": float(r),
+            }
 
-            # Check if there's a hole inside
-            # Invert the mask to find holes
-            mask_inv = cv2.bitwise_not(mask)
-            hole_contours, _ = cv2.findContours(
-                mask_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
-
-            # Filter out small holes and those touching the border
-            for hole in hole_contours:
-                hole_area = cv2.contourArea(hole)
-                if (
-                    hole_area < 50 or hole_area > area * 0.9
-                ):  # Skip tiny holes or those too large
-                    continue
-
-                # Check if hole is not touching the border
-                x, y, w, h = cv2.boundingRect(hole)
-                if (
-                    x <= 1
-                    or y <= 1
-                    or x + w >= binary.shape[1] - 1
-                    or y + h >= binary.shape[0] - 1
-                ):
-                    continue
-
-                # Try to fit an ellipse
-                if len(hole) >= 5:  # Need at least 5 points to fit an ellipse
-                    try:
-                        ellipse = cv2.fitEllipse(hole)
-                        (x, y), (width, height), angle = ellipse
-
-                        # Calculate circularity (1.0 for perfect circle)
-                        circularity = min(width, height) / max(width, height)
-
-                        return {
-                            "ellipse": ellipse,
-                            "circularity": circularity,
-                            "center": (float(x), float(y)),
-                            "width": float(width),
-                            "height": float(height),
-                            "angle": float(angle),
-                        }
-                    except:
-                        continue
-
-        # If we get here, no suitable ellipse was found
+        # If no circles found
         return None
 
     def optimize_viewpoint(self, ellipse_info, camera):
