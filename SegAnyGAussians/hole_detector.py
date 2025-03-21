@@ -6,7 +6,7 @@ import json
 from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
-from scene import GaussianModel
+from scene import Scene, GaussianModel
 from gaussian_renderer import render
 from scene.cameras import Camera
 from utils.graphics_utils import focal2fov, fov2focal
@@ -14,7 +14,12 @@ from utils.graphics_utils import focal2fov, fov2focal
 
 class HoleDetector:
     def __init__(
-        self, scene_path, model_path, mask_path, output_dir="./hole_detection_results", debug=False
+        self,
+        scene_path,
+        model_path,
+        mask_path,
+        output_dir="./hole_detection_results",
+        debug=False,
     ):
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
@@ -28,19 +33,26 @@ class HoleDetector:
         class DummyArgs:
             def __init__(self):
                 self.source_path = scene_path  # COLMAP directory
-                self.model_path = model_path   # Pre-trained model directory
+                self.model_path = model_path  # Pre-trained model directory
                 self.images = "images"
                 self.eval = False
                 self.sh_degree = 3
                 self.white_background = False
                 self.feature_dim = 256
                 self.load_iteration = -1
+                self.allow_principle_point_shift = False
+                self.need_features = False
+                self.need_masks = False
+                self.resolution = 1
+                self.data_device = "cuda"
 
         args = DummyArgs()
         self.gaussian_model = GaussianModel(3)  # sh_degree=3
-        self.gaussian_model.load_ply(os.path.join(model_path, "point_cloud.ply"))
+        self.gaussian_model.load_ply(
+            os.path.join(model_path, "point_cloud", "iteration_9000", "point_cloud.ply")
+        )
         scene = Scene(args, self.gaussian_model, None, load_iteration=-1, shuffle=False)
-        
+
         # Get cameras from scene
         self.cameras = scene.getTrainCameras()
         if not self.cameras:
