@@ -170,35 +170,35 @@ class HoleDetector:
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
 
         # Apply threshold to isolate the object
-        _, binary = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
+        # _, binary = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
 
         # Apply morphological operations to clean up the image
-        kernel = np.ones((5, 5), np.uint8)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-        binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
+        # kernel = np.ones((5, 5), np.uint8)
+        # binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
+        # binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
 
         # Invert the image to detect holes (dark circles)
-        binary_inv = cv2.bitwise_not(binary)
+        # binary_inv = cv2.bitwise_not(binary)
 
         # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(binary_inv, (9, 9), 2)
+        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
 
         # Detect circles using Hough Circle Transform
         circles = cv2.HoughCircles(
             blurred,
             cv2.HOUGH_GRADIENT,
             dp=1,
-            minDist=50,
-            param1=50,
-            param2=30,
-            minRadius=20,
+            minDist=30,
+            param1=20,
+            param2=10,
+            minRadius=30,
             maxRadius=int(min(self.width, self.height) // 4),
         )
 
         if circles is not None:
             # Convert to uint8 and make it RGB for colored circle drawing
             debug_img = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
-            
+
             circles = np.uint16(np.around(circles))
             # Draw all detected circles as ellipses
             for circle in circles[0, :]:
@@ -208,16 +208,16 @@ class HoleDetector:
                     debug_img,
                     ((x, y), (r * 2, r * 2), 0),  # center, (width, height), angle
                     (0, 255, 0),  # Green color
-                    2  # Line thickness
+                    2,  # Line thickness
                 )
                 # Draw the center point
                 cv2.circle(debug_img, (x, y), 2, (0, 0, 255), 3)
-            
+
             # Save the debug image
             if self.debug:
                 cv2.imwrite(
                     os.path.join(self.output_dir, "circle_detection_debug.png"),
-                    debug_img
+                    debug_img,
                 )
 
             # Get the most prominent circle (usually the first one)
@@ -492,10 +492,10 @@ class HoleDetector:
 
         # Save the best render with ellipse visualization
         output_img = self.best_render.copy()
-        
+
         # Convert to uint8 for drawing
         img_uint8 = (output_img * 255).astype(np.uint8)
-        
+
         # Draw the detected ellipse with thicker line and brighter color
         cv2.ellipse(
             img_uint8,
@@ -503,7 +503,7 @@ class HoleDetector:
             (0, 255, 0),  # Green color
             3,  # Thicker line
         )
-        
+
         # Add text showing the circularity
         cv2.putText(
             img_uint8,
@@ -541,7 +541,12 @@ class HoleDetector:
             },
             "object": {
                 "centroid": self.center.cpu().numpy().tolist(),
-                "bbox_dimensions": (self.xyz.max(dim=0).values - self.xyz.min(dim=0).values).cpu().numpy().tolist(),
+                "bbox_dimensions": (
+                    self.xyz.max(dim=0).values - self.xyz.min(dim=0).values
+                )
+                .cpu()
+                .numpy()
+                .tolist(),
             },
         }
 
