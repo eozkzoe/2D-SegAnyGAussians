@@ -196,7 +196,25 @@ class HoleDetector:
         )
 
         if circles is not None:
+            # Convert to uint8 and make it RGB for colored circle drawing
+            debug_img = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
+            
             circles = np.uint16(np.around(circles))
+            # Draw all detected circles
+            for circle in circles[0, :]:
+                x, y, r = circle
+                # Draw the outer circle
+                cv2.circle(debug_img, (x, y), r, (0, 255, 0), 2)
+                # Draw the center of the circle
+                cv2.circle(debug_img, (x, y), 2, (0, 0, 255), 3)
+            
+            # Save the debug image
+            if self.debug:
+                cv2.imwrite(
+                    os.path.join(self.output_dir, "circle_detection_debug.png"),
+                    debug_img
+                )
+
             # Get the most prominent circle (usually the first one)
             x, y, r = circles[0][0]
 
