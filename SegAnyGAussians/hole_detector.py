@@ -469,19 +469,33 @@ class HoleDetector:
 
         # Save the best render with ellipse visualization
         output_img = self.best_render.copy()
-
-        # Draw the detected ellipse
+        
+        # Convert to uint8 for drawing
+        img_uint8 = (output_img * 255).astype(np.uint8)
+        
+        # Draw the detected ellipse with thicker line and brighter color
         cv2.ellipse(
-            (output_img * 255).astype(np.uint8),
+            img_uint8,
             self.best_ellipse["ellipse"],
-            (0, 255, 0),
+            (0, 255, 0),  # Green color
+            3,  # Thicker line
+        )
+        
+        # Add text showing the circularity
+        cv2.putText(
+            img_uint8,
+            f"Circularity: {self.best_circularity:.3f}",
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),  # Green color
             2,
         )
 
         # Save visualization
         cv2.imwrite(
             os.path.join(self.output_dir, "best_view.png"),
-            cv2.cvtColor((output_img * 255).astype(np.uint8), cv2.COLOR_RGB2BGR),
+            cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR),
         )
 
         # Get camera position and direction
