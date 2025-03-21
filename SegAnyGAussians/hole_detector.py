@@ -181,18 +181,18 @@ class HoleDetector:
         # binary_inv = cv2.bitwise_not(binary)
 
         # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (9, 9), 2)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 2)
 
         # Detect circles using Hough Circle Transform
         circles = cv2.HoughCircles(
             blurred,
             cv2.HOUGH_GRADIENT,
             dp=1,
-            minDist=30,
-            param1=20,
-            param2=10,
-            minRadius=30,
-            maxRadius=int(min(self.width, self.height) // 4),
+            minDist=100,
+            param1=90,
+            param2=70,
+            minRadius=100,
+            maxRadius=int(min(self.width, self.height) // 2),
         )
 
         if circles is not None:
@@ -204,9 +204,10 @@ class HoleDetector:
             for circle in circles[0, :]:
                 x, y, r = circle
                 # Draw the ellipse (circle is just an ellipse with equal axes)
-                cv2.ellipse(
+                cv2.circle(
                     debug_img,
-                    ((x, y), (r * 2, r * 2), 0),  # center, (width, height), angle
+                    (x, y),
+                    r,  # center, (width, height), angle
                     (0, 255, 0),  # Green color
                     2,  # Line thickness
                 )
