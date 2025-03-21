@@ -381,7 +381,7 @@ class HoleDetector:
 
                 # If ellipse is detected, draw it on debug view
                 ellipse_info = self.detect_ellipse(render_img)
-                if ellipse_info is not None:
+                if ellipse_info is not None and self.debug:
                     cv2.ellipse(
                         (debug_img * 255).astype(np.uint8),
                         ellipse_info["ellipse"],
@@ -399,7 +399,8 @@ class HoleDetector:
                         2,
                     )
 
-                self.debug_renders.append(debug_img)
+                if self.debug:
+                    self.debug_renders.append(debug_img)
 
             ellipse_info = self.detect_ellipse(render_img)
 
