@@ -10,6 +10,9 @@ from scene import Scene, GaussianModel
 from gaussian_renderer import render, render_mask
 from scene.cameras import Camera
 from utils.graphics_utils import focal2fov, fov2focal
+from skimage.feature import canny
+from skimage.transform import hough_ellipse
+from skimage.draw import ellipse_perimeter
 
 
 class HoleDetector:
@@ -184,80 +187,65 @@ class HoleDetector:
         )
 
     def detect_ellipse(self, image):
-        """Detect circular holes in the rendered image using Hough Circles"""
-        # Convert to grayscale
+        """Detect elliptical holes in the rendered image using Hough Ellipse Transform"""
+
+        # Convert to grayscale and uint8
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-
-        # Apply threshold to isolate the object
-        # _, binary = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
-
-        # Apply morphological operations to clean up the image
-        # kernel = np.ones((5, 5), np.uint8)
-        # binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-        # binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-
-        # Invert the image to detect holes (dark circles)
-        # binary_inv = cv2.bitwise_not(binary)
 
         # Apply Gaussian blur to reduce noise
         blurred = cv2.GaussianBlur(gray, (5, 5), 2)
 
-        # Detect circles using Hough Circle Transform
-        circles = cv2.HoughCircles(
-            blurred,
-            cv2.HOUGH_GRADIENT,
-            dp=1,
-            minDist=100,
-            param1=100,
-            param2=80,
-            minRadius=100,
-            maxRadius=int(min(self.width, self.height) // 2),
+        # Detect edges using Canny
+        edges = canny(blurred, sigma=2.0, low_threshold=50, high_threshold=150)
+
+        # Detect ellipses
+        result = hough_ellipse(
+            edges,
+            accuracy=20,
+            threshold=50,
+            min_size=100,
+            max_size=int(min(self.width, self.height) // 2),
         )
 
-        if circles is not None:
-            # Convert to uint8 and make it RGB for colored circle drawing
-            debug_img = cv2.cvtColor(blurred, cv2.COLOR_GRAY2BGR)
+        if result:
+            # Get the best ellipse (first result)
+            best = list(result)[0]
+            yc, xc, a, b, orientation = best[1], best[0], best[3], best[2], best[4]
 
-            circles = np.uint16(np.around(circles))
-            # Draw all detected circles as ellipses
-            for circle in circles[0, :]:
-                x, y, r = circle
-                # Draw the ellipse (circle is just an ellipse with equal axes)
-                cv2.circle(
-                    debug_img,
-                    (x, y),
-                    r,  # center, (width, height), angle
-                    (0, 255, 0),  # Green color
-                    2,  # Line thickness
-                )
-                # Draw the center point
-                cv2.circle(debug_img, (x, y), 2, (0, 0, 255), 3)
+            # Calculate circularity (ratio of minor to major axis)
+            # Perfect circle has circularity of 1.0
+            circularity = min(a, b) / max(a, b)
 
-            # Save the debug image
+            # Draw the ellipse for debug visualization
             if self.debug:
+                debug_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+                rr, cc = ellipse_perimeter(
+                    int(yc), int(xc), int(a), int(b), orientation=orientation
+                )
+                # Keep only valid coordinates
+                valid = (rr >= 0) & (rr < self.height) & (cc >= 0) & (cc < self.width)
+                rr, cc = rr[valid], cc[valid]
+                debug_img[rr, cc] = [0, 255, 0]  # Green color
                 cv2.imwrite(
-                    os.path.join(self.output_dir, "circle_detection_debug.png"),
+                    os.path.join(self.output_dir, "ellipse_detection_debug.png"),
                     debug_img,
                 )
-
-            # Get the most prominent circle (usually the first one)
-            x, y, r = circles[0][0]
-
-            # Calculate circularity (for compatibility with existing code)
-            # In this case, it's always 1.0 since we're detecting perfect circles
-            circularity = 1.0
 
             return {
-                "ellipse": ((float(x), float(y)), (float(r * 2), float(r * 2)), 0),
-                "circularity": circularity,
-                "center": (float(x), float(y)),
-                "width": float(r * 2),
-                "height": float(r * 2),
-                "angle": 0.0,
-                "radius": float(r),
+                "ellipse": (
+                    (float(xc), float(yc)),
+                    (float(a * 2), float(b * 2)),
+                    float(orientation * 180 / np.pi),
+                ),
+                "circularity": float(circularity),
+                "center": (float(xc), float(yc)),
+                "width": float(a * 2),
+                "height": float(b * 2),
+                "angle": float(orientation * 180 / np.pi),
+                "radius": float((a + b) / 2),
             }
 
-        # If no circles found
+        # If no ellipses found
         return None
 
     def optimize_viewpoint(self, ellipse_info, camera):
@@ -289,6 +277,7 @@ class HoleDetector:
 
     def render_view(self, camera):
         """Render the scene from a given camera viewpoint"""
+
         # Create pipeline parameters
         class PipelineParams:
             def __init__(self):
@@ -333,25 +322,43 @@ class HoleDetector:
             print("Trying existing scene cameras...")
             for i, camera in enumerate(tqdm(self.cameras)):
                 render_img = self.render_view(camera)
-                
+
                 # Save all renders
                 if self.debug:
                     debug_img = render_img.copy()
-                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
-                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
-                              cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 1)
+                    cv2.putText(
+                        debug_img,
+                        f"Scene View {i}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (0, 0, 0),
+                        3,
+                    )
+                    cv2.putText(
+                        debug_img,
+                        f"Scene View {i}",
+                        (20, 40),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        1,
+                        (1, 1, 1),
+                        1,
+                    )
                     self.debug_renders.append(debug_img)
 
                 ellipse_info = self.detect_ellipse(render_img)
                 if ellipse_info is not None:
-                    print(f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}")
-                    all_detections.append({
-                        'circularity': ellipse_info['circularity'],
-                        'camera': camera,
-                        'ellipse': ellipse_info,
-                        'render': render_img
-                    })
+                    print(
+                        f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}"
+                    )
+                    all_detections.append(
+                        {
+                            "circularity": ellipse_info["circularity"],
+                            "camera": camera,
+                            "ellipse": ellipse_info,
+                            "render": render_img,
+                        }
+                    )
 
         # Try generated viewpoints
         print("Trying generated viewpoints...")
@@ -364,20 +371,36 @@ class HoleDetector:
             # Save debug render
             if self.debug:
                 debug_img = render_img.copy()
-                cv2.putText(debug_img, f"View {i}", (20, 40), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
-                cv2.putText(debug_img, f"View {i}", (20, 40), 
-                          cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 1)
+                cv2.putText(
+                    debug_img,
+                    f"View {i}",
+                    (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (0, 0, 0),
+                    3,
+                )
+                cv2.putText(
+                    debug_img,
+                    f"View {i}",
+                    (20, 40),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    1,
+                    (1, 1, 1),
+                    1,
+                )
                 self.debug_renders.append(debug_img)
 
             ellipse_info = self.detect_ellipse(render_img)
             if ellipse_info is not None:
-                all_detections.append({
-                    'circularity': ellipse_info['circularity'],
-                    'camera': camera,
-                    'ellipse': ellipse_info,
-                    'render': render_img
-                })
+                all_detections.append(
+                    {
+                        "circularity": ellipse_info["circularity"],
+                        "camera": camera,
+                        "ellipse": ellipse_info,
+                        "render": render_img,
+                    }
+                )
 
                 # Try to optimize this viewpoint
                 current_camera = camera
@@ -385,20 +408,24 @@ class HoleDetector:
                 current_render = render_img
 
                 for j in range(max_optimizations):
-                    new_camera = self.optimize_viewpoint(current_ellipse, current_camera)
+                    new_camera = self.optimize_viewpoint(
+                        current_ellipse, current_camera
+                    )
                     new_render = self.render_view(new_camera)
                     new_ellipse = self.detect_ellipse(new_render)
 
                     if new_ellipse is None:
                         break
 
-                    if new_ellipse['circularity'] > current_ellipse['circularity']:
-                        all_detections.append({
-                            'circularity': new_ellipse['circularity'],
-                            'camera': new_camera,
-                            'ellipse': new_ellipse,
-                            'render': new_render
-                        })
+                    if new_ellipse["circularity"] > current_ellipse["circularity"]:
+                        all_detections.append(
+                            {
+                                "circularity": new_ellipse["circularity"],
+                                "camera": new_camera,
+                                "ellipse": new_ellipse,
+                                "render": new_render,
+                            }
+                        )
                         current_camera = new_camera
                         current_ellipse = new_ellipse
                         current_render = new_render
@@ -407,11 +434,11 @@ class HoleDetector:
 
         # Select the best detection
         if all_detections:
-            best_detection = max(all_detections, key=lambda x: x['circularity'])
-            self.best_circularity = best_detection['circularity']
-            self.best_camera = best_detection['camera']
-            self.best_ellipse = best_detection['ellipse']
-            self.best_render = best_detection['render']
+            best_detection = max(all_detections, key=lambda x: x["circularity"])
+            self.best_circularity = best_detection["circularity"]
+            self.best_camera = best_detection["camera"]
+            self.best_ellipse = best_detection["ellipse"]
+            self.best_render = best_detection["render"]
 
         # Save debug renders if enabled
         if self.debug and self.debug_renders:
