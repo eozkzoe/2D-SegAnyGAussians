@@ -188,26 +188,38 @@ class HoleDetector:
 
     def detect_ellipse(self, image):
         """Detect elliptical holes in the rendered image using Hough Ellipse Transform"""
-
         # Convert to grayscale and uint8
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-
+        
         # Apply Gaussian blur to reduce noise
         blurred = cv2.GaussianBlur(gray, (5, 5), 2)
+        
+        # Use more aggressive edge detection parameters
+        edges = canny(blurred, sigma=1.5, low_threshold=30, high_threshold=100)
 
-        # Detect edges using Canny
-        edges = canny(blurred, sigma=2.0, low_threshold=50, high_threshold=150)
-
-        # Detect ellipses
+        if self.debug:
+            edge_debug = (edges * 255).astype(np.uint8)
+            cv2.imwrite(os.path.join(self.output_dir, "edge_detection_debug.png"), edge_debug)
+        
+        # Reduce image size for faster processing
+        scale_factor = 0.5
+        small_edges = cv2.resize(edges.astype(np.uint8), None, 
+                               fx=scale_factor, fy=scale_factor)
+        
+        # Detect ellipses with optimized parameters
         result = hough_ellipse(
-            edges,
-            accuracy=20,
-            threshold=50,
-            min_size=100,
-            max_size=int(min(self.width, self.height) // 2),
+            small_edges,
+            accuracy=10,  # Reduced from 20
+            threshold=30,  # Reduced from 50
+            min_size=int(50 * scale_factor),  # Adjusted for scaled image
+            max_size=int(min(self.width, self.height) * scale_factor // 2)
         )
 
         if result:
+            # Scale back the results
+            best = list(result)[0]
+            yc, xc, a, b, orientation = [v/scale_factor for v in best[1:]]
+            
             # Get the best ellipse (first result)
             best = list(result)[0]
             yc, xc, a, b, orientation = best[1], best[0], best[3], best[2], best[4]
