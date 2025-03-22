@@ -203,8 +203,8 @@ class HoleDetector:
             cv2.HOUGH_GRADIENT,
             dp=1,
             minDist=100,
-            param1=90,
-            param2=70,
+            param1=100,
+            param2=80,
             minRadius=100,
             maxRadius=int(min(self.width, self.height) // 2),
         )
@@ -284,6 +284,7 @@ class HoleDetector:
 
     def render_view(self, camera):
         """Render the scene from a given camera viewpoint"""
+
         # Create pipeline parameters
         class PipelineParams:
             def __init__(self):
