@@ -63,10 +63,10 @@ class HoleDetector:
         if torch.count_nonzero(self.mask) == 0:
             print("Mask is empty, inverting mask")
             self.mask = ~self.mask
-            
+
         # Get the number of Gaussians
         n_gaussians = len(self.gaussian_model.get_xyz)
-        
+
         # Resize mask if needed
         if len(self.mask.flatten()) != n_gaussians:
             print(f"Resizing mask from {len(self.mask.flatten())} to {n_gaussians}")
@@ -75,7 +75,12 @@ class HoleDetector:
             if len(flat_mask) > n_gaussians:
                 self.mask = flat_mask[:n_gaussians]
             else:
-                self.mask = torch.cat([flat_mask, torch.zeros(n_gaussians - len(flat_mask), dtype=torch.bool)])
+                self.mask = torch.cat(
+                    [
+                        flat_mask,
+                        torch.zeros(n_gaussians - len(flat_mask), dtype=torch.bool),
+                    ]
+                )
             self.mask = self.mask.to(device="cuda")
 
         # Get scene bounds for camera placement
@@ -291,25 +296,29 @@ class HoleDetector:
                 self.convert_SHs_python = False
                 self.compute_cov3D_python = False
                 self.debug = False
-                self.segment = True  # Enable segmentation
 
         pipeline = PipelineParams()
 
-        # Apply the mask to the scene
-        original_mask = self.gaussian_model._mask.clone()
-        self.gaussian_model._mask = self.mask
-        self.gaussian_model.segment(self.mask)  # Actually segment the Gaussians
-
-        # Render
+        # Render the masked view using render_mask
         with torch.no_grad():
+            mask_res = render_mask(
+                camera,
+                self.gaussian_model,
+                pipeline,
+                self.bg_color,
+                precomputed_mask=self.mask,
+            )
             outputs = render(camera, self.gaussian_model, pipeline, self.bg_color)
 
-        # Restore original mask and Gaussians
-        self.gaussian_model._mask = original_mask
-        self.gaussian_model.segment(~torch.zeros_like(self.mask))  # Reset segmentation
+        # Apply the rendered mask to the image
+        rendering = outputs["render"]
+        mask = mask_res["mask"]
+        mask[mask < 0.5] = 0
+        mask[mask != 0] = 1
+        rendering = rendering * mask
 
         # Get the rendered image
-        img = outputs["render"].permute(1, 2, 0).cpu().numpy()
+        img = rendering.permute(1, 2, 0).cpu().numpy()
 
         return img
 
