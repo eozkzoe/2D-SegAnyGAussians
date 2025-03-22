@@ -7,7 +7,7 @@ from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
 
 from scene import Scene, GaussianModel
-from gaussian_renderer import render
+from gaussian_renderer import render, render_mask
 from scene.cameras import Camera
 from utils.graphics_utils import focal2fov, fov2focal
 
