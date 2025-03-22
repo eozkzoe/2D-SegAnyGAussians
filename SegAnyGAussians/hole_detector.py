@@ -190,23 +190,48 @@ class HoleDetector:
         """Detect elliptical holes in the rendered image using contour detection"""
         # Convert to grayscale and uint8
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        
+
         # Apply Gaussian blur to reduce noise
         blurred = cv2.GaussianBlur(gray, (5, 5), 2)
-        
+
+        # # Use more aggressive edge detection parameters
+        # edges = canny(blurred, sigma=1.5, low_threshold=30, high_threshold=100)
+        #
+        # if self.debug:
+        #     edge_debug = (edges * 255).astype(np.uint8)
+        #     cv2.imwrite(os.path.join(self.output_dir, "edge_detection_debug.png"), edge_debug)
+        #
+        # # Reduce image size for faster processing
+        # scale_factor = 0.5
+        # small_edges = cv2.resize(edges.astype(np.uint8), None,
+        #                        fx=scale_factor, fy=scale_factor)
+        #
+        # # Detect ellipses with optimized parameters
+        # result = hough_ellipse(
+        #     small_edges,
+        #     accuracy=10,  # Reduced from 20
+        #     threshold=30,  # Reduced from 50
+        #     min_size=int(50 * scale_factor),  # Adjusted for scaled image
+        #     max_size=int(min(self.width, self.height) * scale_factor // 2)
+        # )
+
         # Apply Otsu's thresholding
         _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
+
         # Find contours
-        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+        contours, _ = cv2.findContours(
+            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
         if self.debug:
             # Save binary image for debugging
             cv2.imwrite(os.path.join(self.output_dir, "binary_debug.png"), binary)
             # Save contours debug image
             contour_debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
             cv2.drawContours(contour_debug, contours, -1, (0, 255, 0), 2)
-            cv2.imwrite(os.path.join(self.output_dir, "contours_debug.png"), contour_debug)
+            cv2.imwrite(
+                os.path.join(self.output_dir, "contours_debug.png"), contour_debug
+            )
 
         best_ellipse = None
         best_circularity = 0
@@ -217,31 +242,35 @@ class HoleDetector:
                 area = cv2.contourArea(contour)
                 if area < min_area:
                     continue
-                    
+
                 ellipse = cv2.fitEllipse(contour)
                 (xc, yc), (width, height), angle = ellipse
-                
+
                 # Calculate circularity (ratio of minor to major axis)
                 circularity = min(width, height) / max(width, height)
-                
+
                 if circularity > best_circularity:
                     best_circularity = circularity
                     best_ellipse = ellipse
 
         if best_ellipse is not None:
             (xc, yc), (width, height), angle = best_ellipse
-            
+
             # Draw the ellipse for debug visualization
             if self.debug:
                 debug_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
                 cv2.ellipse(debug_img, best_ellipse, (0, 255, 0), 2)
-                cv2.imwrite(os.path.join(self.output_dir, "ellipse_detection_debug.png"), 
-                          debug_img)
+                cv2.imwrite(
+                    os.path.join(self.output_dir, "ellipse_detection_debug.png"),
+                    debug_img,
+                )
 
             return {
-                "ellipse": ((float(xc), float(yc)), 
-                           (float(width), float(height)), 
-                           float(angle)),
+                "ellipse": (
+                    (float(xc), float(yc)),
+                    (float(width), float(height)),
+                    float(angle),
+                ),
                 "circularity": float(best_circularity),
                 "center": (float(xc), float(yc)),
                 "width": float(width),
