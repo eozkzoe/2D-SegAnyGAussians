@@ -187,77 +187,69 @@ class HoleDetector:
         )
 
     def detect_ellipse(self, image):
-        """Detect elliptical holes in the rendered image using Hough Ellipse Transform"""
+        """Detect elliptical holes in the rendered image using contour detection"""
         # Convert to grayscale and uint8
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
         
         # Apply Gaussian blur to reduce noise
         blurred = cv2.GaussianBlur(gray, (5, 5), 2)
         
-        # Use more aggressive edge detection parameters
-        edges = canny(blurred, sigma=1.5, low_threshold=30, high_threshold=100)
-
+        # Apply Otsu's thresholding
+        _, binary = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Find contours
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
         if self.debug:
-            edge_debug = (edges * 255).astype(np.uint8)
-            cv2.imwrite(os.path.join(self.output_dir, "edge_detection_debug.png"), edge_debug)
-        
-        # Reduce image size for faster processing
-        scale_factor = 0.5
-        small_edges = cv2.resize(edges.astype(np.uint8), None, 
-                               fx=scale_factor, fy=scale_factor)
-        
-        # Detect ellipses with optimized parameters
-        result = hough_ellipse(
-            small_edges,
-            accuracy=10,  # Reduced from 20
-            threshold=30,  # Reduced from 50
-            min_size=int(50 * scale_factor),  # Adjusted for scaled image
-            max_size=int(min(self.width, self.height) * scale_factor // 2)
-        )
+            # Save binary image for debugging
+            cv2.imwrite(os.path.join(self.output_dir, "binary_debug.png"), binary)
+            # Save contours debug image
+            contour_debug = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+            cv2.drawContours(contour_debug, contours, -1, (0, 255, 0), 2)
+            cv2.imwrite(os.path.join(self.output_dir, "contours_debug.png"), contour_debug)
 
-        if result:
-            # Scale back the results
-            best = list(result)[0]
-            yc, xc, a, b, orientation = [v/scale_factor for v in best[1:]]
+        best_ellipse = None
+        best_circularity = 0
+        min_area = 1000  # Minimum area to consider
+
+        for contour in contours:
+            if len(contour) >= 5:  # Need at least 5 points to fit ellipse
+                area = cv2.contourArea(contour)
+                if area < min_area:
+                    continue
+                    
+                ellipse = cv2.fitEllipse(contour)
+                (xc, yc), (width, height), angle = ellipse
+                
+                # Calculate circularity (ratio of minor to major axis)
+                circularity = min(width, height) / max(width, height)
+                
+                if circularity > best_circularity:
+                    best_circularity = circularity
+                    best_ellipse = ellipse
+
+        if best_ellipse is not None:
+            (xc, yc), (width, height), angle = best_ellipse
             
-            # Get the best ellipse (first result)
-            best = list(result)[0]
-            yc, xc, a, b, orientation = best[1], best[0], best[3], best[2], best[4]
-
-            # Calculate circularity (ratio of minor to major axis)
-            # Perfect circle has circularity of 1.0
-            circularity = min(a, b) / max(a, b)
-
             # Draw the ellipse for debug visualization
             if self.debug:
                 debug_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-                rr, cc = ellipse_perimeter(
-                    int(yc), int(xc), int(a), int(b), orientation=orientation
-                )
-                # Keep only valid coordinates
-                valid = (rr >= 0) & (rr < self.height) & (cc >= 0) & (cc < self.width)
-                rr, cc = rr[valid], cc[valid]
-                debug_img[rr, cc] = [0, 255, 0]  # Green color
-                cv2.imwrite(
-                    os.path.join(self.output_dir, "ellipse_detection_debug.png"),
-                    debug_img,
-                )
+                cv2.ellipse(debug_img, best_ellipse, (0, 255, 0), 2)
+                cv2.imwrite(os.path.join(self.output_dir, "ellipse_detection_debug.png"), 
+                          debug_img)
 
             return {
-                "ellipse": (
-                    (float(xc), float(yc)),
-                    (float(a * 2), float(b * 2)),
-                    float(orientation * 180 / np.pi),
-                ),
-                "circularity": float(circularity),
+                "ellipse": ((float(xc), float(yc)), 
+                           (float(width), float(height)), 
+                           float(angle)),
+                "circularity": float(best_circularity),
                 "center": (float(xc), float(yc)),
-                "width": float(a * 2),
-                "height": float(b * 2),
-                "angle": float(orientation * 180 / np.pi),
-                "radius": float((a + b) / 2),
+                "width": float(width),
+                "height": float(height),
+                "angle": float(angle),
+                "radius": float((width + height) / 4),
             }
 
-        # If no ellipses found
         return None
 
     def optimize_viewpoint(self, ellipse_info, camera):
