@@ -270,26 +270,28 @@ class HoleDetector:
 
     def render_view(self, camera):
         """Render the scene from a given camera viewpoint"""
-
         # Create pipeline parameters
         class PipelineParams:
             def __init__(self):
                 self.convert_SHs_python = False
                 self.compute_cov3D_python = False
                 self.debug = False
+                self.segment = True  # Enable segmentation
 
         pipeline = PipelineParams()
 
         # Apply the mask to the scene
         original_mask = self.gaussian_model._mask.clone()
         self.gaussian_model._mask = self.mask
+        self.gaussian_model.segment(self.mask)  # Actually segment the Gaussians
 
         # Render
         with torch.no_grad():
             outputs = render(camera, self.gaussian_model, pipeline, self.bg_color)
 
-        # Restore original mask
+        # Restore original mask and Gaussians
         self.gaussian_model._mask = original_mask
+        self.gaussian_model.segment(~torch.zeros_like(self.mask))  # Reset segmentation
 
         # Get the rendered image
         img = outputs["render"].permute(1, 2, 0).cpu().numpy()
