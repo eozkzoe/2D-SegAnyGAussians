@@ -58,11 +58,25 @@ class HoleDetector:
         if not self.cameras:
             print("Warning: No scene cameras found, will use generated viewpoints only")
 
-        # Load the mask
+        # Load the mask and ensure it matches Gaussian count
         self.mask = torch.load(mask_path)
         if torch.count_nonzero(self.mask) == 0:
             print("Mask is empty, inverting mask")
             self.mask = ~self.mask
+            
+        # Get the number of Gaussians
+        n_gaussians = len(self.gaussian_model.get_xyz)
+        
+        # Resize mask if needed
+        if len(self.mask.flatten()) != n_gaussians:
+            print(f"Resizing mask from {len(self.mask.flatten())} to {n_gaussians}")
+            # Take first n_gaussians elements if mask is too large, or pad with False if too small
+            flat_mask = self.mask.flatten()
+            if len(flat_mask) > n_gaussians:
+                self.mask = flat_mask[:n_gaussians]
+            else:
+                self.mask = torch.cat([flat_mask, torch.zeros(n_gaussians - len(flat_mask), dtype=torch.bool)])
+            self.mask = self.mask.to(device="cuda")
 
         # Get scene bounds for camera placement
         self.xyz = self.gaussian_model.get_xyz.detach()
