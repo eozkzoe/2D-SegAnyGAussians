@@ -289,7 +289,6 @@ class HoleDetector:
 
     def render_view(self, camera):
         """Render the scene from a given camera viewpoint"""
-
         # Create pipeline parameters
         class PipelineParams:
             def __init__(self):
@@ -299,6 +298,9 @@ class HoleDetector:
 
         pipeline = PipelineParams()
 
+        # Convert mask to float for render_mask
+        float_mask = self.mask.float()
+
         # Render the masked view using render_mask
         with torch.no_grad():
             mask_res = render_mask(
@@ -306,7 +308,7 @@ class HoleDetector:
                 self.gaussian_model,
                 pipeline,
                 self.bg_color,
-                precomputed_mask=self.mask,
+                precomputed_mask=float_mask,
             )
             outputs = render(camera, self.gaussian_model, pipeline, self.bg_color)
 
