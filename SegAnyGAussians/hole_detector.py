@@ -326,164 +326,92 @@ class HoleDetector:
 
     def detect_hole(self, max_iterations=20, max_optimizations=5):
         print(f"Detecting holes in segmented object...")
+        all_detections = []
 
         # First try existing scene cameras
         if self.cameras:
             print("Trying existing scene cameras...")
             for i, camera in enumerate(tqdm(self.cameras)):
                 render_img = self.render_view(camera)
-
-                # Save debug render if enabled
+                
+                # Save all renders
                 if self.debug:
                     debug_img = render_img.copy()
-                    cv2.putText(
-                        debug_img,
-                        f"Scene View {i}",
-                        (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 0, 0),
-                        3,
-                    )
-                    cv2.putText(
-                        debug_img,
-                        f"Scene View {i}",
-                        (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (1, 1, 1),
-                        1,
-                    )
+                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
+                    cv2.putText(debug_img, f"Scene View {i}", (20, 40), 
+                              cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 1)
                     self.debug_renders.append(debug_img)
 
                 ellipse_info = self.detect_ellipse(render_img)
                 if ellipse_info is not None:
-                    print(
-                        f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}"
-                    )
-                    self.best_circularity = ellipse_info["circularity"]
-                    self.best_camera = camera
-                    self.best_ellipse = ellipse_info
-                    self.best_render = render_img
-                    break
+                    print(f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}")
+                    all_detections.append({
+                        'circularity': ellipse_info['circularity'],
+                        'camera': camera,
+                        'ellipse': ellipse_info,
+                        'render': render_img
+                    })
 
-        # If no hole found or not circular enough, try generated viewpoints
-        if self.best_circularity < 0.8:
-            print("Trying generated viewpoints...")
-            # Try different viewpoints
-            for i in tqdm(range(max_iterations)):
-                camera = self.generate_viewpoint(
-                    random_offset=(i > 8), iteration=i, max_iterations=max_iterations
-                )
-                render_img = self.render_view(camera)
+        # Try generated viewpoints
+        print("Trying generated viewpoints...")
+        for i in tqdm(range(max_iterations)):
+            camera = self.generate_viewpoint(
+                random_offset=(i > 8), iteration=i, max_iterations=max_iterations
+            )
+            render_img = self.render_view(camera)
 
-                # Save debug render if enabled
-                if self.debug:
-                    debug_img = render_img.copy()
-                    # Draw view number in white with black outline for visibility
-                    cv2.putText(
-                        debug_img,
-                        f"View {i}",
-                        (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 0, 0),
-                        3,
-                    )
-                    cv2.putText(
-                        debug_img,
-                        f"View {i}",
-                        (20, 40),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (1, 1, 1),
-                        1,
-                    )
-
-                # If ellipse is detected, draw it on debug view
-                ellipse_info = self.detect_ellipse(render_img)
-                if ellipse_info is not None and self.debug:
-                    cv2.ellipse(
-                        (debug_img * 255).astype(np.uint8),
-                        ellipse_info["ellipse"],
-                        (0, 255, 0),
-                        2,
-                    )
-                    debug_img = debug_img.astype(np.float32) / 255.0
-                    cv2.putText(
-                        debug_img,
-                        f"Circularity: {ellipse_info['circularity']:.3f}",
-                        (20, 80),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1,
-                        (0, 1, 0),
-                        2,
-                    )
-
-                if self.debug:
-                    self.debug_renders.append(debug_img)
+            # Save debug render
+            if self.debug:
+                debug_img = render_img.copy()
+                cv2.putText(debug_img, f"View {i}", (20, 40), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 3)
+                cv2.putText(debug_img, f"View {i}", (20, 40), 
+                          cv2.FONT_HERSHEY_SIMPLEX, 1, (1, 1, 1), 1)
+                self.debug_renders.append(debug_img)
 
             ellipse_info = self.detect_ellipse(render_img)
-
             if ellipse_info is not None:
-                print(
-                    f"Ellipse detected with circularity: {ellipse_info['circularity']:.3f}"
-                )
+                all_detections.append({
+                    'circularity': ellipse_info['circularity'],
+                    'camera': camera,
+                    'ellipse': ellipse_info,
+                    'render': render_img
+                })
 
-                # Save initial detection
-                if ellipse_info["circularity"] > self.best_circularity:
-                    self.best_circularity = ellipse_info["circularity"]
-                    self.best_camera = camera
-                    self.best_ellipse = ellipse_info
-                    self.best_render = render_img
-
-                # Try to optimize the viewpoint
+                # Try to optimize this viewpoint
                 current_camera = camera
                 current_ellipse = ellipse_info
                 current_render = render_img
 
                 for j in range(max_optimizations):
-                    # If circularity is already good, stop optimizing
-                    if current_ellipse["circularity"] > 0.95:
-                        break
-
-                    # Optimize viewpoint
-                    new_camera = self.optimize_viewpoint(
-                        current_ellipse, current_camera
-                    )
-
-                    # Render new view
+                    new_camera = self.optimize_viewpoint(current_ellipse, current_camera)
                     new_render = self.render_view(new_camera)
-
-                    # Detect ellipse in new view
                     new_ellipse = self.detect_ellipse(new_render)
 
                     if new_ellipse is None:
                         break
 
-                    print(
-                        f"  Optimization step {j+1}: circularity = {new_ellipse['circularity']:.3f}"
-                    )
-
-                    # If new view is better, update
-                    if new_ellipse["circularity"] > current_ellipse["circularity"]:
+                    if new_ellipse['circularity'] > current_ellipse['circularity']:
+                        all_detections.append({
+                            'circularity': new_ellipse['circularity'],
+                            'camera': new_camera,
+                            'ellipse': new_ellipse,
+                            'render': new_render
+                        })
                         current_camera = new_camera
                         current_ellipse = new_ellipse
                         current_render = new_render
-
-                        # Update best if this is better
-                        if current_ellipse["circularity"] > self.best_circularity:
-                            self.best_circularity = current_ellipse["circularity"]
-                            self.best_camera = current_camera
-                            self.best_ellipse = current_ellipse
-                            self.best_render = current_render
                     else:
-                        # No improvement, stop optimizing
                         break
 
-                    # If we found a very good circle, stop early
-                    if self.best_circularity > 0.95:
-                        break
+        # Select the best detection
+        if all_detections:
+            best_detection = max(all_detections, key=lambda x: x['circularity'])
+            self.best_circularity = best_detection['circularity']
+            self.best_camera = best_detection['camera']
+            self.best_ellipse = best_detection['ellipse']
+            self.best_render = best_detection['render']
 
         # Save debug renders if enabled
         if self.debug and self.debug_renders:
