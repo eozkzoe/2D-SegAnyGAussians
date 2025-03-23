@@ -214,12 +214,25 @@ class HoleDetector:
             for circle in circles:
                 x, y, r = circle
                 
-                # Create circular mask
+                # Create circle perimeter mask
+                perimeter_mask = np.zeros_like(gray)
+                cv2.circle(perimeter_mask, (int(x), int(y)), int(r), 255, 1)
+                perimeter_points = np.where(perimeter_mask > 0)
+                
+                # Check how many perimeter points touch non-black areas
+                edge_pixels = gray[perimeter_points]
+                edge_ratio = np.sum(edge_pixels > 30) / len(edge_pixels)
+                
+                # Skip if less than 90% of perimeter touches content
+                if edge_ratio < 0.9:
+                    continue
+                
+                # Create circular mask for darkness check
                 mask = np.zeros_like(gray)
                 cv2.circle(mask, (int(x), int(y)), int(r), 255, -1)
                 mask = mask > 0
                 
-                # Measure average darkness inside circle (inverted brightness)
+                # Measure average darkness inside circle
                 circle_region = gray[mask]
                 darkness = 1.0 - (np.mean(circle_region) / 255.0)
                 
