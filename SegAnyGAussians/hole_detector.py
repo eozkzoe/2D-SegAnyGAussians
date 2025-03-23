@@ -187,83 +187,72 @@ class HoleDetector:
         )
 
     def detect_ellipse(self, image):
-        """Detect elliptical holes in the rendered image using Hough Ellipse Transform"""
+        """Detect circular holes by finding dark circles in the image"""
         # Convert to grayscale and uint8
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
         
-        # Downscale image significantly for initial processing
-        scale_factor = 0.25  # Process at 1/4 resolution
-        height, width = int(gray.shape[0] * scale_factor), int(gray.shape[1] * scale_factor)
-        small_gray = cv2.resize(gray, (width, height))
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 2)
         
-        # Apply stronger blur to reduce noise and edges
-        blurred = cv2.GaussianBlur(small_gray, (5, 5), 3)
-        
-        # More aggressive edge detection parameters
-        edges = canny(blurred, sigma=2.0, low_threshold=20, high_threshold=80)
-
-        if self.debug:
-            edge_debug = (edges * 255).astype(np.uint8)
-            cv2.imwrite(os.path.join(self.output_dir, "edge_detection_debug.png"), edge_debug)
-        
-        # Detect ellipses with optimized parameters
-        result = hough_ellipse(
-            edges,
-            accuracy=15,      # Reduced accuracy for speed
-            threshold=25,     # Lower threshold to detect more candidates
-            min_size=30,      # Adjusted for scaled image
-            max_size=int(min(height, width) // 2)
+        # Detect circles using Hough Circle Transform
+        circles = cv2.HoughCircles(
+            blurred,
+            cv2.HOUGH_GRADIENT,
+            dp=1,
+            minDist=100,
+            param1=50,
+            param2=30,
+            minRadius=30,
+            maxRadius=int(min(self.width, self.height) // 2)
         )
-
-        if result:
-            # Scale back the results to original image size
-            best = list(result)[0]
-            yc, xc, a, b, orientation = best[1], best[0], best[3], best[2], best[4]
+        
+        if circles is not None:
+            best_circle = None
+            best_darkness = 0
             
-            # Scale coordinates back to original image size
-            xc /= scale_factor
-            yc /= scale_factor
-            a /= scale_factor
-            b /= scale_factor
-
-            # Get the best ellipse (first result)
-            best = list(result)[0]
-            yc, xc, a, b, orientation = best[1], best[0], best[3], best[2], best[4]
-
-            # Calculate circularity (ratio of minor to major axis)
-            # Perfect circle has circularity of 1.0
-            circularity = min(a, b) / max(a, b)
-
-            # Draw the ellipse for debug visualization
-            if self.debug:
-                debug_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-                rr, cc = ellipse_perimeter(
-                    int(yc), int(xc), int(a), int(b), orientation=orientation
-                )
-                # Keep only valid coordinates
-                valid = (rr >= 0) & (rr < self.height) & (cc >= 0) & (cc < self.width)
-                rr, cc = rr[valid], cc[valid]
-                debug_img[rr, cc] = [0, 255, 0]  # Green color
-                cv2.imwrite(
-                    os.path.join(self.output_dir, "ellipse_detection_debug.png"),
-                    debug_img,
-                )
-
-            return {
-                "ellipse": (
-                    (float(xc), float(yc)),
-                    (float(a * 2), float(b * 2)),
-                    float(orientation * 180 / np.pi),
-                ),
-                "circularity": float(circularity),
-                "center": (float(xc), float(yc)),
-                "width": float(a * 2),
-                "height": float(b * 2),
-                "angle": float(orientation * 180 / np.pi),
-                "radius": float((a + b) / 2),
-            }
-
-        # If no ellipses found
+            circles = circles[0]
+            for circle in circles:
+                x, y, r = circle
+                
+                # Create circular mask
+                mask = np.zeros_like(gray)
+                cv2.circle(mask, (int(x), int(y)), int(r), 255, -1)
+                mask = mask > 0
+                
+                # Measure average darkness inside circle (inverted brightness)
+                circle_region = gray[mask]
+                darkness = 1.0 - (np.mean(circle_region) / 255.0)
+                
+                if darkness > best_darkness:
+                    best_darkness = darkness
+                    best_circle = circle
+            
+            if best_circle is not None:
+                xc, yc, radius = best_circle
+                
+                # Draw circle for debug visualization
+                if self.debug:
+                    debug_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+                    cv2.circle(debug_img, (int(xc), int(yc)), int(radius), (0, 255, 0), 2)
+                    cv2.imwrite(
+                        os.path.join(self.output_dir, "circle_detection_debug.png"),
+                        debug_img
+                    )
+                
+                return {
+                    "ellipse": (
+                        (float(xc), float(yc)),
+                        (float(radius * 2), float(radius * 2)),
+                        0.0  # angle is always 0 for circles
+                    ),
+                    "circularity": float(best_darkness),  # use darkness as circularity measure
+                    "center": (float(xc), float(yc)),
+                    "width": float(radius * 2),
+                    "height": float(radius * 2),
+                    "angle": 0.0,
+                    "radius": float(radius)
+                }
+        
         return None
 
     def optimize_viewpoint(self, ellipse_info, camera):
