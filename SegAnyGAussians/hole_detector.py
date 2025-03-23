@@ -186,86 +186,114 @@ class HoleDetector:
             up_vector,
         )
 
-    def detect_ellipse(self, image):
+    def detect_ellipse(self, image, index):
         """Detect circular holes by finding dark circles in the image"""
         # Convert to grayscale and uint8
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-        
+
         # Apply Gaussian blur to reduce noise
         blurred = cv2.GaussianBlur(gray, (5, 5), 2)
-        
+
+        # Apply Canny edge detection
+        edges = cv2.Canny(blurred, 50, 150)
+
         # Detect circles using Hough Circle Transform
         circles = cv2.HoughCircles(
-            blurred,
+            edges,  # Use edges instead of blurred
             cv2.HOUGH_GRADIENT,
             dp=1,
             minDist=100,
-            param1=50,
-            param2=30,
+            param1=100,
+            param2=80,
             minRadius=30,
-            maxRadius=int(min(self.width, self.height) // 2)
+            maxRadius=int(min(self.width, self.height) // 2),
         )
-        
+
         if circles is not None:
             best_circle = None
             best_darkness = 0
-            
+
+            # Create debug image early to show all candidates
+            if self.debug:
+                debug_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+                # Draw edge detection result in blue channel
+                debug_img[:, :, 0] = edges
+
             circles = circles[0]
-            for circle in circles:
+            for idx, circle in enumerate(circles):
                 x, y, r = circle
-                
+
+                # Draw all candidate circles in red with their index
+                if self.debug:
+                    cv2.circle(debug_img, (int(x), int(y)), int(r), (0, 0, 255), 1)
+                    cv2.putText(
+                        debug_img,
+                        str(idx),
+                        (int(x), int(y)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (0, 0, 255),
+                        1,
+                    )
+
                 # Create circle perimeter mask
                 perimeter_mask = np.zeros_like(gray)
                 cv2.circle(perimeter_mask, (int(x), int(y)), int(r), 255, 1)
                 perimeter_points = np.where(perimeter_mask > 0)
-                
+
                 # Check how many perimeter points touch non-black areas
                 edge_pixels = gray[perimeter_points]
                 edge_ratio = np.sum(edge_pixels > 30) / len(edge_pixels)
-                
+
                 # Skip if less than 90% of perimeter touches content
                 if edge_ratio < 0.9:
                     continue
-                
+
                 # Create circular mask for darkness check
                 mask = np.zeros_like(gray)
                 cv2.circle(mask, (int(x), int(y)), int(r), 255, -1)
                 mask = mask > 0
-                
+
                 # Measure average darkness inside circle
                 circle_region = gray[mask]
                 darkness = 1.0 - (np.mean(circle_region) / 255.0)
-                
+
                 if darkness > best_darkness:
                     best_darkness = darkness
                     best_circle = circle
-            
+
             if best_circle is not None:
                 xc, yc, radius = best_circle
-                
+
                 # Draw circle for debug visualization
                 if self.debug:
                     debug_img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
-                    cv2.circle(debug_img, (int(xc), int(yc)), int(radius), (0, 255, 0), 2)
-                    cv2.imwrite(
-                        os.path.join(self.output_dir, "circle_detection_debug.png"),
-                        debug_img
+                    cv2.circle(
+                        debug_img, (int(xc), int(yc)), int(radius), (0, 255, 0), 2
                     )
-                
+                    cv2.imwrite(
+                        os.path.join(
+                            self.output_dir, f"circle_detection_debug_{index}.png"
+                        ),
+                        debug_img,
+                    )
+
                 return {
                     "ellipse": (
                         (float(xc), float(yc)),
                         (float(radius * 2), float(radius * 2)),
-                        0.0  # angle is always 0 for circles
+                        0.0,  # angle is always 0 for circles
                     ),
-                    "circularity": float(best_darkness),  # use darkness as circularity measure
+                    "circularity": float(
+                        best_darkness
+                    ),  # use darkness as circularity measure
                     "center": (float(xc), float(yc)),
                     "width": float(radius * 2),
                     "height": float(radius * 2),
                     "angle": 0.0,
-                    "radius": float(radius)
+                    "radius": float(radius),
                 }
-        
+
         return None
 
     def optimize_viewpoint(self, ellipse_info, camera):
@@ -366,7 +394,7 @@ class HoleDetector:
                     )
                     self.debug_renders.append(debug_img)
 
-                ellipse_info = self.detect_ellipse(render_img)
+                ellipse_info = self.detect_ellipse(render_img, i)
                 if ellipse_info is not None:
                     print(
                         f"Hole detected in scene camera {i} with circularity: {ellipse_info['circularity']:.3f}"
@@ -411,7 +439,7 @@ class HoleDetector:
                 )
                 self.debug_renders.append(debug_img)
 
-            ellipse_info = self.detect_ellipse(render_img)
+            ellipse_info = self.detect_ellipse(render_img, i)
             if ellipse_info is not None:
                 all_detections.append(
                     {
@@ -432,7 +460,7 @@ class HoleDetector:
                         current_ellipse, current_camera
                     )
                     new_render = self.render_view(new_camera)
-                    new_ellipse = self.detect_ellipse(new_render)
+                    new_ellipse = self.detect_ellipse(new_render, i)
 
                     if new_ellipse is None:
                         break
