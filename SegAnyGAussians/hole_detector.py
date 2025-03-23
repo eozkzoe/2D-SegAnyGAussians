@@ -522,6 +522,37 @@ class HoleDetector:
         if self.best_ellipse is None:
             return
 
+        # Get camera position and direction
+        camera_position = -np.linalg.inv(self.best_camera.R) @ self.best_camera.T
+        camera_direction = self.center.cpu().numpy() - camera_position
+        camera_direction = camera_direction / np.linalg.norm(camera_direction)
+        
+        # Calculate hole normal (opposite of camera direction)
+        hole_normal = -camera_direction
+        
+        # Generate two perpendicular viewing directions
+        # First perpendicular direction using cross product with up vector
+        perp1 = np.cross(hole_normal, [0, 1, 0])
+        perp1 = perp1 / np.linalg.norm(perp1)
+        
+        # Second perpendicular direction
+        perp2 = np.cross(hole_normal, perp1)
+        perp2 = perp2 / np.linalg.norm(perp2)
+        
+        # Create and render side views
+        distance = float(self.radius.cpu()) * 2.0
+        for i, direction in enumerate([perp1, perp2]):
+            side_position = self.center.cpu().numpy() + direction * distance
+            side_camera = self.create_camera(side_position, self.center.cpu().numpy(), [0, 1, 0])
+            side_render = self.render_view(side_camera)
+            
+            # Save side view
+            side_img = (side_render * 255).astype(np.uint8)
+            cv2.imwrite(
+                os.path.join(self.output_dir, f"side_view_{i+1}.png"),
+                cv2.cvtColor(side_img, cv2.COLOR_RGB2BGR),
+            )
+
         # Save the best render with ellipse visualization
         output_img = self.best_render.copy()
 
@@ -553,10 +584,6 @@ class HoleDetector:
             cv2.cvtColor(img_uint8, cv2.COLOR_RGB2BGR),
         )
 
-        # Get camera position and direction
-        camera_position = -np.linalg.inv(self.best_camera.R) @ self.best_camera.T
-        camera_direction = self.center.cpu().numpy() - camera_position
-
         # Save detection results
         results = {
             "circularity": float(self.best_circularity),
@@ -570,6 +597,13 @@ class HoleDetector:
                 "position": camera_position.tolist(),
                 "direction": camera_direction.tolist(),
                 "up": self.best_camera.R[:, 1].tolist(),
+            },
+            "hole": {
+                "normal": hole_normal.tolist(),
+                "perpendicular_directions": {
+                    "direction1": perp1.tolist(),
+                    "direction2": perp2.tolist()
+                }
             },
             "object": {
                 "centroid": self.center.cpu().numpy().tolist(),
