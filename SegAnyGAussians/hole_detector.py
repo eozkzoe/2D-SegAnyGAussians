@@ -149,8 +149,23 @@ class HoleDetector:
         # Use the 80th percentile radius instead of max scale
         distance = float(self.radius.cpu()) * 2.0  # Multiply by 2 for better visibility
 
-        if iteration == 0 and not random_offset:
-            # First try: look along Z axis
+        # Add cardinal direction views for first 6 iterations
+        if iteration < 6:
+            # Define the six cardinal directions
+            cardinal_directions = [
+                ([1, 0, 0], [0, 1, 0]),  # +X axis, Y up
+                ([-1, 0, 0], [0, 1, 0]), # -X axis, Y up
+                ([0, 1, 0], [0, 0, 1]),  # +Y axis, Z up
+                ([0, -1, 0], [0, 0, 1]), # -Y axis, Z up
+                ([0, 0, 1], [0, 1, 0]),  # +Z axis, Y up
+                ([0, 0, -1], [0, 1, 0]), # -Z axis, Y up
+            ]
+            direction, up = cardinal_directions[iteration]
+            camera_pos = self.center + torch.tensor(direction, device="cuda") * distance
+            up_vector = np.array(up)
+            
+        elif iteration == 6 and not random_offset:
+            # Original first view along Z axis
             camera_pos = self.center + torch.tensor([0, 0, distance], device="cuda")
             up_vector = np.array([0, 1, 0])
         else:
@@ -246,7 +261,7 @@ class HoleDetector:
                 edge_ratio = np.sum(edge_pixels > 30) / len(edge_pixels)
 
                 # Skip if less than 90% of perimeter touches content
-                if edge_ratio < 0.9:
+                if edge_ratio < 0.0:
                     continue
 
                 # Create circular mask for darkness check
@@ -526,28 +541,30 @@ class HoleDetector:
         camera_position = -np.linalg.inv(self.best_camera.R) @ self.best_camera.T
         camera_direction = self.center.cpu().numpy() - camera_position
         camera_direction = camera_direction / np.linalg.norm(camera_direction)
-        
+
         # Calculate hole normal (opposite of camera direction)
         hole_normal = -camera_direction
         hole_center = self.center.cpu().numpy()
-        
+
         # Generate two perpendicular viewing directions
         perp1 = np.cross(hole_normal, [0, 1, 0])
         perp1 = perp1 / np.linalg.norm(perp1)
         perp2 = np.cross(hole_normal, perp1)
         perp2 = perp2 / np.linalg.norm(perp2)
-        
+
         # Get scene bounds for camera placement
         distance = float(self.radius.cpu()) * 2.0
-        
+
         # Create and render side views from scene edges
-        for i, (direction, up_vector) in enumerate([(perp1, [0, 1, 0]), (perp2, [0, 1, 0])]):
+        for i, (direction, up_vector) in enumerate(
+            [(perp1, [0, 1, 0]), (perp2, [0, 1, 0])]
+        ):
             # Place camera at scene edge opposite to viewing direction
             camera_pos = hole_center - direction * distance
             # Look towards the hole center along the perpendicular direction
             side_camera = self.create_camera(camera_pos, hole_center, up_vector)
             side_render = self.render_view(side_camera)
-            
+
             # Save side view
             side_img = (side_render * 255).astype(np.uint8)
             cv2.imwrite(
@@ -604,8 +621,8 @@ class HoleDetector:
                 "normal": hole_normal.tolist(),
                 "perpendicular_directions": {
                     "direction1": perp1.tolist(),
-                    "direction2": perp2.tolist()
-                }
+                    "direction2": perp2.tolist(),
+                },
             },
             "object": {
                 "centroid": self.center.cpu().numpy().tolist(),
