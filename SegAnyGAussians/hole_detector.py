@@ -529,21 +529,23 @@ class HoleDetector:
         
         # Calculate hole normal (opposite of camera direction)
         hole_normal = -camera_direction
+        hole_center = self.center.cpu().numpy()
         
         # Generate two perpendicular viewing directions
-        # First perpendicular direction using cross product with up vector
         perp1 = np.cross(hole_normal, [0, 1, 0])
         perp1 = perp1 / np.linalg.norm(perp1)
-        
-        # Second perpendicular direction
         perp2 = np.cross(hole_normal, perp1)
         perp2 = perp2 / np.linalg.norm(perp2)
         
-        # Create and render side views
+        # Get scene bounds for camera placement
         distance = float(self.radius.cpu()) * 2.0
-        for i, direction in enumerate([perp1, perp2]):
-            side_position = self.center.cpu().numpy() + direction * distance
-            side_camera = self.create_camera(side_position, self.center.cpu().numpy(), [0, 1, 0])
+        
+        # Create and render side views from scene edges
+        for i, (direction, up_vector) in enumerate([(perp1, [0, 1, 0]), (perp2, [0, 1, 0])]):
+            # Place camera at scene edge opposite to viewing direction
+            camera_pos = hole_center - direction * distance
+            # Look towards the hole center along the perpendicular direction
+            side_camera = self.create_camera(camera_pos, hole_center, up_vector)
             side_render = self.render_view(side_camera)
             
             # Save side view
