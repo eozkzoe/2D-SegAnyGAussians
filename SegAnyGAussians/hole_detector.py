@@ -190,38 +190,41 @@ class HoleDetector:
         """Detect elliptical holes in the rendered image using Hough Ellipse Transform"""
         # Convert to grayscale and uint8
         gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY)
-
-        # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(gray, (5, 5), 2)
-
-        # Use more aggressive edge detection parameters
-        edges = canny(blurred, sigma=1.5, low_threshold=30, high_threshold=100)
+        
+        # Downscale image significantly for initial processing
+        scale_factor = 0.25  # Process at 1/4 resolution
+        height, width = int(gray.shape[0] * scale_factor), int(gray.shape[1] * scale_factor)
+        small_gray = cv2.resize(gray, (width, height))
+        
+        # Apply stronger blur to reduce noise and edges
+        blurred = cv2.GaussianBlur(small_gray, (5, 5), 3)
+        
+        # More aggressive edge detection parameters
+        edges = canny(blurred, sigma=2.0, low_threshold=20, high_threshold=80)
 
         if self.debug:
             edge_debug = (edges * 255).astype(np.uint8)
-            cv2.imwrite(
-                os.path.join(self.output_dir, "edge_detection_debug.png"), edge_debug
-            )
-
-        # Reduce image size for faster processing
-        scale_factor = 0.5
-        small_edges = cv2.resize(
-            edges.astype(np.uint8), None, fx=scale_factor, fy=scale_factor
-        )
-
+            cv2.imwrite(os.path.join(self.output_dir, "edge_detection_debug.png"), edge_debug)
+        
         # Detect ellipses with optimized parameters
         result = hough_ellipse(
-            small_edges,
-            accuracy=10,  # Reduced from 20
-            threshold=30,  # Reduced from 50
-            min_size=int(50 * scale_factor),  # Adjusted for scaled image
-            max_size=int(min(self.width, self.height) * scale_factor // 2),
+            edges,
+            accuracy=15,      # Reduced accuracy for speed
+            threshold=25,     # Lower threshold to detect more candidates
+            min_size=30,      # Adjusted for scaled image
+            max_size=int(min(height, width) // 2)
         )
 
         if result:
-            # Scale back the results
+            # Scale back the results to original image size
             best = list(result)[0]
-            yc, xc, a, b, orientation = [v / scale_factor for v in best[1:]]
+            yc, xc, a, b, orientation = best[1], best[0], best[3], best[2], best[4]
+            
+            # Scale coordinates back to original image size
+            xc /= scale_factor
+            yc /= scale_factor
+            a /= scale_factor
+            b /= scale_factor
 
             # Get the best ellipse (first result)
             best = list(result)[0]
