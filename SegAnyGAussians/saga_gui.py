@@ -933,6 +933,7 @@ class GaussianSplattingGUI:
     def compute_normals_from_neighbors(self, mask):
         """Compute normals for all selected Gaussians using their neighbors"""
         xyz = self.engine["scene"].get_xyz.detach().cpu().numpy()
+        mask = mask.detach().cpu().numpy()
         selected_points = xyz[mask]
 
         from scipy.spatial import KDTree
