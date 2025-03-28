@@ -930,6 +930,35 @@ class GaussianSplattingGUI:
 
         dpg.set_value("_texture", self.render_buffer)
 
+    def compute_normals_from_neighbors(self, mask):
+        """Compute normals for all selected Gaussians using their neighbors"""
+        xyz = self.engine["scene"].get_xyz.detach().cpu().numpy()
+        selected_points = xyz[mask]
+
+        from scipy.spatial import KDTree
+
+        tree = KDTree(xyz)
+
+        normals = []
+        for point in selected_points:
+            # Find 5 nearest neighbors (including the point itself)
+            distances, indices = tree.query(point.reshape(1, -1), k=5)
+            plane_points = xyz[indices[0]]
+
+            # Use PCA to find the normal
+            pca = PCA(n_components=3)
+            pca.fit(plane_points)
+            normal = pca.components_[2]
+
+            # Ensure normal points outward
+            center_to_point = point - np.mean(xyz, axis=0)
+            if np.dot(normal, center_to_point) < 0:
+                normal = -normal
+
+            normals.append(normal)
+
+        return np.array(normals)
+
     def save_segmentation(self, mask_name):
         """Save the current segmentation mask"""
 
@@ -940,6 +969,7 @@ class GaussianSplattingGUI:
             )
             torch.save(save_mask, f"./segmentation_res/{mask_name}.pt")
             print(f"Saved segmentation mask to: ./segmentation_res/{mask_name}.pt")
+
             pose_mask = torch.load(f"./segmentation_res/{mask_name}.pt")
             pose_mask = pose_mask.squeeze()
             # assert mask.shape[0] == self._xyz.shape[0]
@@ -948,25 +978,41 @@ class GaussianSplattingGUI:
                 print(
                     "Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first."
                 )
-
-            self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
-            pose = self.pose_estimator.estimate_pose()
-            bbox = self.pose_estimator.get_oriented_bbox()
+            normals = self.compute_normals_from_neighbors(pose_mask)
+                        # Save normals and other information
             pose_info = {
-                "centroid": pose["centroid"].tolist(),
-                "normal": pose["normal"].tolist(),
-                "planarity": float(pose["planarity"]),
-                "bbox_center": bbox["center"].tolist(),
-                "bbox_axes": bbox["axes"].tolist(),
-                "bbox_dimensions": bbox["dimensions"].tolist(),
+                "normals": normals.tolist(),
+                "average_normal": np.mean(normals, axis=0).tolist(),
+                "normal_variance": np.var(normals, axis=0).tolist()
             }
-            with open(f"./segmentation_res/{mask_name}_pose.json", "w") as f:
+            
+            # Save to JSON
+            with open(f"./segmentation_res/{mask_name}_normals.json", "w") as f:
                 json.dump(pose_info, f, indent=2)
 
-            print(f"Saved pose information to {pose_path}")
-            print(f"Centroid: {pose['centroid']}")
-            print(f"Normal: {pose['normal']}")
-            print(f"Planarity: {pose['planarity']:.3f}")
+            print(f"Saved normal information to: ./segmentation_res/{mask_name}_normals.json")
+            print(f"Average normal: {pose_info['average_normal']}")
+            print(f"Normal variance: {pose_info['normal_variance']}")
+
+
+            # self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
+            # pose = self.pose_estimator.estimate_pose()
+            # bbox = self.pose_estimator.get_oriented_bbox()
+            # pose_info = {
+            #     "centroid": pose["centroid"].tolist(),
+            #     "normal": pose["normal"].tolist(),
+            #     "planarity": float(pose["planarity"]),
+            #     "bbox_center": bbox["center"].tolist(),
+            #     "bbox_axes": bbox["axes"].tolist(),
+            #     "bbox_dimensions": bbox["dimensions"].tolist(),
+            # }
+            # with open(f"./segmentation_res/{mask_name}_pose.json", "w") as f:
+            #     json.dump(pose_info, f, indent=2)
+
+            # print(f"Saved pose information to {pose_path}")
+            # print(f"Centroid: {pose['centroid']}")
+            # print(f"Normal: {pose['normal']}")
+            # print(f"Planarity: {pose['planarity']:.3f}")
         except Exception as e:
             print(e)
             with dpg.window(label="Tips"):
