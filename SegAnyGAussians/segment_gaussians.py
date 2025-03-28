@@ -3,6 +3,8 @@ import torch
 import numpy as np
 from scene import Scene, GaussianModel
 from argparse import ArgumentParser
+from scipy.spatial import KDTree
+from sklearn.decomposition import PCA
 
 
 class GaussianSegmenter:
@@ -65,6 +67,31 @@ class GaussianSegmenter:
                 )
             self.mask = self.mask.to(device="cuda")
 
+    def compute_normal_from_neighbors(self, selected_idx):
+        """Compute normal from selected Gaussian and its 4 nearest neighbors"""
+        xyz = self.gaussian_model.get_xyz.detach().cpu().numpy()
+        
+        # Build KD-tree for nearest neighbor search
+        tree = KDTree(xyz)
+        
+        # Find 5 nearest neighbors (including the point itself)
+        distances, indices = tree.query(xyz[selected_idx:selected_idx+1], k=5)
+        
+        # Get the points forming the plane
+        plane_points = xyz[indices[0]]
+        
+        # Use PCA to find the normal (third principal component)
+        pca = PCA(n_components=3)
+        pca.fit(plane_points)
+        normal = pca.components_[2]
+        
+        # Ensure normal points outward (assuming center is at origin)
+        center_to_point = xyz[selected_idx] - np.mean(xyz, axis=0)
+        if np.dot(normal, center_to_point) < 0:
+            normal = -normal
+            
+        return normal
+
     def segment_and_save(self):
         """Segment the Gaussians using the mask and save as a new PLY"""
         # Apply segmentation
@@ -83,6 +110,15 @@ class GaussianSegmenter:
         self.gaussian_model.clear_segment()
 
         return output_path
+
+    def process_selected_gaussian(self, selected_idx):
+        """Process a selected Gaussian and print its normal"""
+        normal = self.compute_normal_from_neighbors(selected_idx)
+        print(f"\nSelected Gaussian {selected_idx}:")
+        print(f"Position: {self.gaussian_model.get_xyz[selected_idx].detach().cpu().numpy()}")
+        print(f"Computed normal: {normal}")
+        print(f"Normal magnitude: {np.linalg.norm(normal)}")
+        return normal
 
 
 def main():
@@ -113,9 +149,10 @@ def main():
     parser.add_argument(
         "--output", type=str, default="./segmented_gaussians", help="Output directory"
     )
-
+    parser.add_argument("--selected_idx", type=int, help="Index of Gaussian to analyze normal")
+    
     args = parser.parse_args()
-
+    
     segmenter = GaussianSegmenter(
         scene_path=args.scene,
         model_path=args.model,
@@ -123,9 +160,12 @@ def main():
         iteration=args.iteration,
         output_dir=args.output,
     )
-
+    
     output_path = segmenter.segment_and_save()
     print(f"Segmentation complete. Results saved to: {output_path}")
+    
+    if args.selected_idx is not None:
+        segmenter.process_selected_gaussian(args.selected_idx)
 
 
 if __name__ == "__main__":
