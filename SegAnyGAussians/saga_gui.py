@@ -974,64 +974,61 @@ class GaussianSplattingGUI:
 
             normals.append(normal)
 
-        avg_normal = np.mean(normals, axis=0)
-        avg_normal = avg_normal / np.linalg.norm(avg_normal)  # Normalize
+        # avg_normal = np.mean(normals, axis=0)
+        # avg_normal = avg_normal / np.linalg.norm(avg_normal)  # Normalize
 
-        # Visualize average normal by creating temporary Gaussians
-        normal_length = (
-            0.5  # Adjust this value to change the length of the normal vector
-        )
-        normal_points = np.array(
-            [center, center + normal_length * avg_normal]  # Start point  # End point
-        )
+        # # Visualize average normal by creating temporary Gaussians
+        # normal_length = (
+        #     0.5  # Adjust this value to change the length of the normal vector
+        # )
+        # normal_points = np.array(
+        #     [center, center + normal_length * avg_normal]  # Start point  # End point
+        # )
 
-        # Create visualization Gaussians for the normal vector
-        vis_xyz = torch.tensor(normal_points, dtype=torch.float32, device="cuda")
-        vis_scaling = torch.ones_like(vis_xyz)
-        vis_scaling[:, 0] = -5.0
-        vis_scaling[:, 1] = -5.0
-        vis_scaling[:, 2] = -2.0
-        # Calculate rotation to align with normal direction
-        vis_rotation = torch.zeros((2, 4), device="cuda")
-        # Convert normal to rotation quaternion (w, x, y, z)
-        from scipy.spatial.transform import Rotation as R
+        # # Create visualization Gaussians for the normal vector
+        # vis_xyz = torch.tensor(normal_points, dtype=torch.float32, device="cuda")
+        # vis_scaling = torch.ones_like(vis_xyz)
+        # vis_scaling[:, 0] = -5.0
+        # vis_scaling[:, 1] = -5.0
+        # vis_scaling[:, 2] = -2.0
+        # # Calculate rotation to align with normal direction
+        # vis_rotation = torch.zeros((2, 4), device="cuda")
+        # # Convert normal to rotation quaternion (w, x, y, z)
+        # from scipy.spatial.transform import Rotation as R
+        # rot = R.from_rotvec(np.array([0.0, 1.0, 0.0]) * np.arccos(avg_normal[2]))
+        # quat = rot.as_quat()
+        # vis_rotation[:] = torch.tensor([quat[3], quat[0], quat[1], quat[2]], device="cuda")
+        # vis_opacity = torch.ones((2, 1), device="cuda")
+        # vis_features_dc = torch.zeros((2, 1, 3), device="cuda")
+        # vis_features_dc[:, 0, 0] = 1.0  # Red color for visualization
+        # vis_features_rest = torch.zeros(
+        #     (2, self.engine["scene"]._features_rest.shape[1], 3), device="cuda"
+        # )
 
-        rot = R.from_rotvec(np.array([0.0, 1.0, 0.0]) * np.arccos(avg_normal[2]))
-        quat = rot.as_quat()
-        vis_rotation[:] = torch.tensor(
-            [quat[3], quat[0], quat[1], quat[2]], device="cuda"
-        )
-        vis_opacity = torch.ones((2, 1), device="cuda")
-        vis_features_dc = torch.zeros((2, 1, 3), device="cuda")
-        vis_features_dc[:, 0, 0] = 1.0  # Red color for visualization
-        vis_features_rest = torch.zeros(
-            (2, self.engine["scene"]._features_rest.shape[1], 3), device="cuda"
-        )
+        # # Add visualization Gaussians to the scene
+        # self.engine["scene"]._xyz = torch.cat([self.engine["scene"]._xyz, vis_xyz])
+        # self.engine["scene"]._scaling = torch.cat(
+        #     [self.engine["scene"]._scaling, vis_scaling]
+        # )
+        # self.engine["scene"]._rotation = torch.cat(
+        #     [self.engine["scene"]._rotation, vis_rotation]
+        # )
+        # self.engine["scene"]._opacity = torch.cat(
+        #     [self.engine["scene"]._opacity, vis_opacity]
+        # )
+        # self.engine["scene"]._features_dc = torch.cat(
+        #     [self.engine["scene"]._features_dc, vis_features_dc]
+        # )
+        # self.engine["scene"]._features_rest = torch.cat(
+        #     [self.engine["scene"]._features_rest, vis_features_rest]
+        # )
 
-        # Add visualization Gaussians to the scene
-        self.engine["scene"]._xyz = torch.cat([self.engine["scene"]._xyz, vis_xyz])
-        self.engine["scene"]._scaling = torch.cat(
-            [self.engine["scene"]._scaling, vis_scaling]
-        )
-        self.engine["scene"]._rotation = torch.cat(
-            [self.engine["scene"]._rotation, vis_rotation]
-        )
-        self.engine["scene"]._opacity = torch.cat(
-            [self.engine["scene"]._opacity, vis_opacity]
-        )
-        self.engine["scene"]._features_dc = torch.cat(
-            [self.engine["scene"]._features_dc, vis_features_dc]
-        )
-        self.engine["scene"]._features_rest = torch.cat(
-            [self.engine["scene"]._features_rest, vis_features_rest]
-        )
-
-        self.engine["scene"]._mask = torch.cat(
-            [
-                self.engine["scene"]._mask,
-                torch.ones(2, dtype=torch.float, device="cuda"),
-            ]
-        )
+        # self.engine["scene"]._mask = torch.cat(
+        #     [
+        #         self.engine["scene"]._mask,
+        #         torch.ones(2, dtype=torch.float, device="cuda"),
+        #     ]
+        # )
 
         return np.array(normals)
 
