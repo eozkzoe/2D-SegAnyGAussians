@@ -987,9 +987,20 @@ class GaussianSplattingGUI:
 
         # Create visualization Gaussians for the normal vector
         vis_xyz = torch.tensor(normal_points, dtype=torch.float32, device="cuda")
-        vis_scaling = torch.ones_like(vis_xyz) * 0.01  # Small fixed scale
+        vis_scaling = torch.ones_like(vis_xyz)
+        vis_scaling[:, 0] = -5.0
+        vis_scaling[:, 1] = -5.0
+        vis_scaling[:, 2] = -2.0
+        # Calculate rotation to align with normal direction
         vis_rotation = torch.zeros((2, 4), device="cuda")
-        vis_rotation[:, 0] = 1  # Identity rotation
+        # Convert normal to rotation quaternion (w, x, y, z)
+        from scipy.spatial.transform import Rotation as R
+
+        rot = R.from_rotvec(np.array([0.0, 1.0, 0.0]) * np.arccos(avg_normal[2]))
+        quat = rot.as_quat()
+        vis_rotation[:] = torch.tensor(
+            [quat[3], quat[0], quat[1], quat[2]], device="cuda"
+        )
         vis_opacity = torch.ones((2, 1), device="cuda")
         vis_features_dc = torch.zeros((2, 1, 3), device="cuda")
         vis_features_dc[:, 0, 0] = 1.0  # Red color for visualization
