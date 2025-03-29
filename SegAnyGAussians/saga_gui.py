@@ -932,9 +932,21 @@ class GaussianSplattingGUI:
 
     def compute_normals_from_neighbors(self, mask):
         """Compute normals for all selected Gaussians using their neighbors"""
-        xyz = self.engine["scene"].get_xyz.detach().cpu().numpy()
-        mask = mask.detach().cpu().numpy().flatten()[: len(xyz)]
-        selected_points = xyz[mask]
+        self.engine["scene"].segment(mask)
+        selected_points = self.engine["scene"].get_xyz.detach().cpu().numpy()
+        # xyz = self.engine["scene"].get_xyz.detach().cpu().numpy()
+        # flat_mask = mask.detach().cpu().numpy().flatten()
+        # print(f"Resizing mask from {len(flat_mask)} to {len(xyz)}")
+        # if len(flat_mask) > len(xyz):
+        #     flat_mask = flat_mask[: len(xyz)]
+        # else:
+        #     flat_mask = torch.cat(
+        #         [
+        #             flat_mask,
+        #             torch.zeros(len(xyz) - len(flat_mask), dtype=torch.bool),
+        #         ]
+        #     )
+        # selected_points = xyz[mask]
 
         from scipy.spatial import KDTree
 
