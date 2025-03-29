@@ -993,6 +993,9 @@ class GaussianSplattingGUI:
         vis_opacity = torch.ones((2, 1), device="cuda")
         vis_features_dc = torch.zeros((2, 1, 3), device="cuda")
         vis_features_dc[:, 0, 0] = 1.0  # Red color for visualization
+        vis_features_rest = torch.zeros(
+            (2, self.engine["scene"]._features_rest.shape[1], 3), device="cuda"
+        )
 
         # Add visualization Gaussians to the scene
         self.engine["scene"]._xyz = torch.cat([self.engine["scene"]._xyz, vis_xyz])
@@ -1008,12 +1011,16 @@ class GaussianSplattingGUI:
         self.engine["scene"]._features_dc = torch.cat(
             [self.engine["scene"]._features_dc, vis_features_dc]
         )
-        self.engine["scene"]._features_rest = torch.cat([self.engine["scene"]._features_rest, vis_features_rest])
+        self.engine["scene"]._features_rest = torch.cat(
+            [self.engine["scene"]._features_rest, vis_features_rest]
+        )
 
-        self.engine["scene"]._mask = torch.cat([
-            self.engine["scene"]._mask,
-            torch.ones(2, dtype=torch.float, device="cuda")
-        ])
+        self.engine["scene"]._mask = torch.cat(
+            [
+                self.engine["scene"]._mask,
+                torch.ones(2, dtype=torch.float, device="cuda"),
+            ]
+        )
 
         return np.array(normals)
 
