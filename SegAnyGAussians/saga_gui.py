@@ -933,7 +933,7 @@ class GaussianSplattingGUI:
     def compute_normals_from_neighbors(self, mask):
         """Compute normals for all selected Gaussians using their neighbors"""
         xyz = self.engine["scene"].get_xyz.detach().cpu().numpy()
-        mask = mask.detach().cpu().numpy()
+        mask = mask.detach().cpu().numpy().flatten()[: len(xyz)]
         selected_points = xyz[mask]
 
         from scipy.spatial import KDTree
@@ -980,21 +980,22 @@ class GaussianSplattingGUI:
                     "Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first."
                 )
             normals = self.compute_normals_from_neighbors(pose_mask)
-                        # Save normals and other information
+            # Save normals and other information
             pose_info = {
                 "normals": normals.tolist(),
                 "average_normal": np.mean(normals, axis=0).tolist(),
-                "normal_variance": np.var(normals, axis=0).tolist()
+                "normal_variance": np.var(normals, axis=0).tolist(),
             }
-            
+
             # Save to JSON
             with open(f"./segmentation_res/{mask_name}_normals.json", "w") as f:
                 json.dump(pose_info, f, indent=2)
 
-            print(f"Saved normal information to: ./segmentation_res/{mask_name}_normals.json")
+            print(
+                f"Saved normal information to: ./segmentation_res/{mask_name}_normals.json"
+            )
             print(f"Average normal: {pose_info['average_normal']}")
             print(f"Normal variance: {pose_info['normal_variance']}")
-
 
             # self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
             # pose = self.pose_estimator.estimate_pose()
