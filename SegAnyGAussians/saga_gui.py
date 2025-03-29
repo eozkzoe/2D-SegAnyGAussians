@@ -932,8 +932,9 @@ class GaussianSplattingGUI:
 
     def compute_normals_from_neighbors(self, mask):
         """Compute normals for all selected Gaussians using their neighbors"""
-        self.engine["scene"].segment(mask)
         selected_points = self.engine["scene"].get_xyz.detach().cpu().numpy()
+        print(selected_points.size)
+        # selected_points = self.engine["scene"].get_xyz.detach().cpu().numpy()
         # xyz = self.engine["scene"].get_xyz.detach().cpu().numpy()
         # flat_mask = mask.detach().cpu().numpy().flatten()
         # print(f"Resizing mask from {len(flat_mask)} to {len(xyz)}")
@@ -950,13 +951,15 @@ class GaussianSplattingGUI:
 
         from scipy.spatial import KDTree
 
-        tree = KDTree(xyz)
+        tree = KDTree(selected_points)
 
         normals = []
         for point in selected_points:
             # Find 5 nearest neighbors (including the point itself)
-            distances, indices = tree.query(point.reshape(1, -1), k=5)
-            plane_points = xyz[indices[0]]
+            distances, indices = tree.query(
+                point.reshape(1, -1), k=min(5, len(selected_points))
+            )
+            plane_points = selected_points[indices[0]]
 
             # Use PCA to find the normal
             pca = PCA(n_components=3)
@@ -964,7 +967,7 @@ class GaussianSplattingGUI:
             normal = pca.components_[2]
 
             # Ensure normal points outward
-            center_to_point = point - np.mean(xyz, axis=0)
+            center_to_point = point - np.mean(selected_points, axis=0)
             if np.dot(normal, center_to_point) < 0:
                 normal = -normal
 
