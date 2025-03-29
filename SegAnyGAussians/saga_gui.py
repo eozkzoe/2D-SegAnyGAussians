@@ -1008,6 +1008,12 @@ class GaussianSplattingGUI:
         self.engine["scene"]._features_dc = torch.cat(
             [self.engine["scene"]._features_dc, vis_features_dc]
         )
+        self.engine["scene"]._features_rest = torch.cat([self.engine["scene"]._features_rest, vis_features_rest])
+
+        self.engine["scene"]._mask = torch.cat([
+            self.engine["scene"]._mask,
+            torch.ones(2, dtype=torch.float, device="cuda")
+        ])
 
         return np.array(normals)
 
