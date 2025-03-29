@@ -278,6 +278,7 @@ class GaussianSplattingGUI:
         self.render_mode_similarity = False
         self.render_mode_pca = False
         self.render_mode_cluster = False
+        self.render_mode_normal = False
 
         self.save_flag = False
 
@@ -398,6 +399,9 @@ class GaussianSplattingGUI:
 
         def render_mode_cluster_callback(sender):
             self.render_mode_cluster = not self.render_mode_cluster
+        
+        def render_mode_normal_callback(sender):
+            self.render_mode_normal = not self.render_mode_normal
 
         # control window
         with dpg.window(
@@ -440,6 +444,11 @@ class GaussianSplattingGUI:
             dpg.add_checkbox(
                 label="3D CLUSTER",
                 callback=render_mode_cluster_callback,
+                user_data="Some Data",
+            )
+            dpg.add_checkbox(
+                label="NORMAL",
+                callback=render_mode_normal_callback,
                 user_data="Some Data",
             )
 
@@ -756,6 +765,15 @@ class GaussianSplattingGUI:
         scale_gated_feat = sems * self.gates.unsqueeze(0).unsqueeze(0)
         scale_gated_feat = torch.nn.functional.normalize(scale_gated_feat, dim=-1, p=2)
 
+        # --- normal map--- #
+        normal_map = None
+        if "normal" in scene_outputs:
+            normal_map = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
+            # Normalize to [0, 1] range for visualization
+            normal_map = (normal_map + 1) / 2
+
+
+
         if self.clear_edit:
             self.new_click_xy = []
             self.clear_edit = False
@@ -926,6 +944,13 @@ class GaussianSplattingGUI:
                 )
 
             render_num += 1
+        
+        if self.render_mode_normal and normal_map is not None:
+            self.render_buffer = (
+                normal_map.cpu().numpy().reshape(-1)
+                if self.render_buffer is None
+                else self.render_buffer + normal_map.cpu().numpy().reshape(-1)
+            )
         self.render_buffer /= render_num
 
         dpg.set_value("_texture", self.render_buffer)
