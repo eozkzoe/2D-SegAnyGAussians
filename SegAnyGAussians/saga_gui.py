@@ -11,14 +11,12 @@ from utils.general_utils import safe_state
 from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
 
-# from gaussian_renderer import GaussianModel
 import numpy as np
 from PIL import Image
 import colorsys
 import cv2
 from sklearn.decomposition import PCA
 
-# from scene.gaussian_model import GaussianModel
 from scene import Scene, GaussianModel, FeatureGaussianModel
 import dearpygui.dearpygui as dpg
 import math
@@ -27,7 +25,6 @@ from utils.graphics_utils import getWorld2View2, focal2fov, fov2focal
 
 from scipy.spatial.transform import Rotation as R
 
-# from cuml.cluster.hdbscan import HDBSCAN
 from hdbscan import HDBSCAN
 
 from pose_estimator import PoseEstimator
@@ -695,7 +692,6 @@ class GaussianSplattingGUI:
         self.cluster_point_colors = self.label_to_color[
             self.seg_score.argmax(dim=-1).cpu().numpy()
         ]
-        # self.cluster_point_colors[self.seg_score.max(dim = -1)[0].detach().cpu().numpy() < 0.5] = (0,0,0)
 
     def pca(self, X, n_components=3):
         n = X.shape[0]
@@ -843,7 +839,6 @@ class GaussianSplattingGUI:
                 new_feat = featmap[int(xy[1]) % H, int(xy[0]) % W, :].reshape(
                     featmap.shape[-1], -1
                 )
-                # Get normal at clicked point
                 new_normal = normal_map[int(xy[1]) % H, int(xy[0]) % W]
 
                 if (self.prompt_num == 0) or (not self.clickmode_multi_button):
@@ -861,8 +856,6 @@ class GaussianSplattingGUI:
                 self.new_click = False
 
             score_map = featmap @ self.chosen_feature
-            # print(score_map.shape, score_map.min(), score_map.max(), "score_map_shape")
-
             score_map = (score_map + 1.0) / 2
             if self.render_mode_normal:
                 normal_score = torch.zeros_like(
@@ -929,11 +922,8 @@ class GaussianSplattingGUI:
                 else:
                     final_mask = feature_mask
 
-                # Convert normal mask to point mask
                 point_normal_mask = normal_mask.reshape(-1)
-                point_normal_mask = point_normal_mask[
-                    : feature_mask.shape[0]
-                ]  # Ensure same size as feature mask
+                point_normal_mask = point_normal_mask[: feature_mask.shape[0]]
                 final_mask = feature_mask & point_normal_mask
                 self.score_pts_binary = final_mask
 
@@ -1019,110 +1009,26 @@ class GaussianSplattingGUI:
         dpg.set_value("_texture", self.render_buffer)
 
     def compute_normals_from_neighbors(self, mask):
-        """Compute normals for all selected Gaussians using their neighbors"""
+        """Compute a single normal for all selected Gaussians using PCA"""
         selected_points = self.engine["scene"].get_xyz.detach().cpu().numpy()
         print("Number of selected Gaussians:", selected_points.size)
-        # selected_points = self.engine["scene"].get_xyz.detach().cpu().numpy()
-        # xyz = self.engine["scene"].get_xyz.detach().cpu().numpy()
-        # flat_mask = mask.detach().cpu().numpy().flatten()
-        # print(f"Resizing mask from {len(flat_mask)} to {len(xyz)}")
-        # if len(flat_mask) > len(xyz):
-        #     flat_mask = flat_mask[: len(xyz)]
-        # else:
-        #     flat_mask = torch.cat(
-        #         [
-        #             flat_mask,
-        #             torch.zeros(len(xyz) - len(flat_mask), dtype=torch.bool),
-        #         ]
-        #     )
-        # selected_points = xyz[mask]
+
+        # Fit PCA to all selected points
+        pca = PCA(n_components=3)
+        pca.fit(selected_points)
+
+        # The normal is the last principal component (least variance direction)
+        normal = pca.components_[2]
+
+        # Orient normal towards the outside (away from centroid)
         center = np.mean(selected_points, axis=0)
+        center_to_points = selected_points - center
+        if np.mean(np.dot(center_to_points, normal)) < 0:
+            normal = -normal
 
-        from scipy.spatial import KDTree
-
-        tree = KDTree(selected_points)
-
-        normals = []
-        for point in selected_points:
-            # Find 5 nearest neighbors (including the point itself)
-            distances, indices = tree.query(
-                point.reshape(1, -1), k=min(5, len(selected_points))
-            )
-            plane_points = selected_points[indices[0]]
-
-            # Use PCA to find the normal
-            pca = PCA(n_components=3)
-            pca.fit(plane_points)
-            normal = pca.components_[2]
-
-            # Ensure normal points outward
-            center_to_point = point - np.mean(selected_points, axis=0)
-            if np.dot(normal, center_to_point) < 0:
-                normal = -normal
-
-            normals.append(normal)
-
-        # avg_normal = np.mean(normals, axis=0)
-        # avg_normal = avg_normal / np.linalg.norm(avg_normal)  # Normalize
-
-        # # Visualize average normal by creating temporary Gaussians
-        # normal_length = (
-        #     0.5  # Adjust this value to change the length of the normal vector
-        # )
-        # normal_points = np.array(
-        #     [center, center + normal_length * avg_normal]  # Start point  # End point
-        # )
-
-        # # Create visualization Gaussians for the normal vector
-        # vis_xyz = torch.tensor(normal_points, dtype=torch.float32, device="cuda")
-        # vis_scaling = torch.ones_like(vis_xyz)
-        # vis_scaling[:, 0] = -5.0
-        # vis_scaling[:, 1] = -5.0
-        # vis_scaling[:, 2] = -2.0
-        # # Calculate rotation to align with normal direction
-        # vis_rotation = torch.zeros((2, 4), device="cuda")
-        # # Convert normal to rotation quaternion (w, x, y, z)
-        # from scipy.spatial.transform import Rotation as R
-        # rot = R.from_rotvec(np.array([0.0, 1.0, 0.0]) * np.arccos(avg_normal[2]))
-        # quat = rot.as_quat()
-        # vis_rotation[:] = torch.tensor([quat[3], quat[0], quat[1], quat[2]], device="cuda")
-        # vis_opacity = torch.ones((2, 1), device="cuda")
-        # vis_features_dc = torch.zeros((2, 1, 3), device="cuda")
-        # vis_features_dc[:, 0, 0] = 1.0  # Red color for visualization
-        # vis_features_rest = torch.zeros(
-        #     (2, self.engine["scene"]._features_rest.shape[1], 3), device="cuda"
-        # )
-
-        # # Add visualization Gaussians to the scene
-        # self.engine["scene"]._xyz = torch.cat([self.engine["scene"]._xyz, vis_xyz])
-        # self.engine["scene"]._scaling = torch.cat(
-        #     [self.engine["scene"]._scaling, vis_scaling]
-        # )
-        # self.engine["scene"]._rotation = torch.cat(
-        #     [self.engine["scene"]._rotation, vis_rotation]
-        # )
-        # self.engine["scene"]._opacity = torch.cat(
-        #     [self.engine["scene"]._opacity, vis_opacity]
-        # )
-        # self.engine["scene"]._features_dc = torch.cat(
-        #     [self.engine["scene"]._features_dc, vis_features_dc]
-        # )
-        # self.engine["scene"]._features_rest = torch.cat(
-        #     [self.engine["scene"]._features_rest, vis_features_rest]
-        # )
-
-        # self.engine["scene"]._mask = torch.cat(
-        #     [
-        #         self.engine["scene"]._mask,
-        #         torch.ones(2, dtype=torch.float, device="cuda"),
-        #     ]
-        # )
-
-        return np.array(normals)
+        return normal
 
     def save_segmentation(self, mask_name):
-        """Save the current segmentation mask"""
-
         try:
             os.makedirs("./segmentation_res", exist_ok=True)
             save_mask = (
@@ -1133,29 +1039,23 @@ class GaussianSplattingGUI:
 
             pose_mask = torch.load(f"./segmentation_res/{mask_name}.pt")
             pose_mask = pose_mask.squeeze()
-            # assert mask.shape[0] == self._xyz.shape[0]
             if torch.count_nonzero(pose_mask) == 0:
                 pose_mask = ~pose_mask
                 print(
-                    "Seems like the mask is empty, segmenting the whole point cloud. Please run seg.py first."
+                    "Seems like the mask is empty, segmenting the whole point cloud. Please click segment3d first."
                 )
-            normals = self.compute_normals_from_neighbors(pose_mask)
-            # Save normals and other information
+            normal = self.compute_normals_from_neighbors(pose_mask)
             pose_info = {
-                "normals": normals.tolist(),
-                "average_normal": np.mean(normals, axis=0).tolist(),
-                "normal_variance": np.var(normals, axis=0).tolist(),
+                "normal": normal,
             }
 
-            # Save to JSON
-            with open(f"./segmentation_res/{mask_name}_normals.json", "w") as f:
+            with open(f"./segmentation_res/{mask_name}_normal.json", "w") as f:
                 json.dump(pose_info, f, indent=2)
 
             print(
-                f"Saved normal information to: ./segmentation_res/{mask_name}_normals.json"
+                f"Saved normal information to: ./segmentation_res/{mask_name}_normal.json"
             )
-            print(f"Average normal: {pose_info['average_normal']}")
-            print(f"Normal variance: {pose_info['normal_variance']}")
+            print(f"normal: {normal}")
 
             # self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
             # pose = self.pose_estimator.estimate_pose()
