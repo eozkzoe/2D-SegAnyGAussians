@@ -399,7 +399,7 @@ class GaussianSplattingGUI:
 
         def render_mode_cluster_callback(sender):
             self.render_mode_cluster = not self.render_mode_cluster
-        
+
         def render_mode_normal_callback(sender):
             self.render_mode_normal = not self.render_mode_normal
 
@@ -720,6 +720,37 @@ class GaussianSplattingGUI:
         self.proj_mat = self.pca(sem_chosen, n_components=3)
         print("project mat initialized !")
 
+    def segment3d_with_normal_filter(self, feature_selected_mask, view_camera):
+        """Filter selected gaussians based on their normal direction from renderer"""
+        # Get rendered normals
+        scene_outputs = render(
+            view_camera, self.engine["scene"], self.opt, self.bg_color
+        )
+        normal_map = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
+
+        # Get valid normals for selected points
+        valid_mask = feature_selected_mask & (torch.norm(normal_map, dim=-1) > 0.1)
+        valid_normals = normal_map[valid_mask]
+
+        if valid_normals.shape[0] == 0:
+            return feature_selected_mask
+
+        # Find dominant normal using PCA
+        pca = PCA(n_components=3)
+        pca.fit(valid_normals.cpu().numpy())
+        dominant_normal = torch.from_numpy(pca.components_[0]).to(valid_normals.device)
+
+        # Calculate alignment scores
+        alignments = torch.abs(torch.sum(valid_normals * dominant_normal, dim=-1))
+        normal_threshold = 0.8  # Adjust this threshold to control strictness
+        normal_mask = alignments > normal_threshold
+
+        # Create final mask
+        final_mask = feature_selected_mask.clone()
+        final_mask[valid_mask] = normal_mask
+
+        return final_mask
+
     @torch.no_grad()
     def fetch_data(self, view_camera):
 
@@ -771,8 +802,6 @@ class GaussianSplattingGUI:
             normal_map = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
             # Normalize to [0, 1] range for visualization
             normal_map = (normal_map + 1) / 2
-
-
 
         if self.clear_edit:
             self.new_click_xy = []
@@ -866,9 +895,7 @@ class GaussianSplattingGUI:
 
                 score_pts = scale_gated_feat_pts @ self.chosen_feature
                 score_pts = (score_pts + 1.0) / 2
-                self.score_pts_binary = (score_pts > dpg.get_value("_ScoreThres")).sum(
-                    1
-                ) > 0
+                feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
 
                 # save_path = "./debug_robot_{:0>3d}.ply".format(self.object_seg_id)
                 # try:
@@ -876,6 +903,9 @@ class GaussianSplattingGUI:
                 #     self.engine['feature'].roll_back()
                 # except:
                 #     pass
+                self.score_points_binary = self.segment3d_with_normal_filter(
+                    feature_mask, view_camera
+                )
                 self.engine["scene"].segment(self.score_pts_binary)
                 self.engine["feature"].segment(self.score_pts_binary)
 
@@ -944,7 +974,7 @@ class GaussianSplattingGUI:
                 )
 
             render_num += 1
-        
+
         if self.render_mode_normal and normal_map is not None:
             self.render_buffer = (
                 normal_map.cpu().numpy().reshape(-1)
