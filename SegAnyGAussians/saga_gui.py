@@ -755,7 +755,7 @@ class GaussianSplattingGUI:
 
     @torch.no_grad()
     def fetch_data(self, view_camera):
-
+        score_map = None
         scene_outputs = render(
             view_camera, self.engine["scene"], self.opt, self.bg_color
         )
