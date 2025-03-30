@@ -16,4 +16,21 @@
 #define BLOCK_X 16
 #define BLOCK_Y 16
 
+#define BLEND_DEPTH
+
+#define Ld
+#define far 1000.0f
+#define near 0.2f
+
+#define Ln
+
+// define an macro that represent Ld || Ln, used to compute shared values in backwards
+#ifdef Ld
+#define LdOrLn
+#else
+#ifdef Ln
+#define LdOrLn
+#endif
+#endif
+
 #endif

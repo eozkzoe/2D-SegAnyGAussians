@@ -15,7 +15,7 @@
 #include <tuple>
 #include <string>
 	
-std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+std::tuple<int, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor,  torch::Tensor>
 RasterizeGaussiansCUDA(
 	const torch::Tensor& background,
 	const torch::Tensor& means3D,
@@ -52,6 +52,12 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const float tan_fovx, 
 	const float tan_fovy,
     const torch::Tensor& dL_dout_color,
+	const torch::Tensor& dL_dout_depth,
+	const torch::Tensor& dL_dout_alpha,
+	const torch::Tensor& dL_dout_normal,
+	const torch::Tensor& dL_dout_distortion,
+	const torch::Tensor& dL_dout_P,
+	const torch::Tensor& dL_dout_M,
 	const torch::Tensor& sh,
 	const int degree,
 	const torch::Tensor& campos,
@@ -59,7 +65,9 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
 	const int R,
 	const torch::Tensor& binningBuffer,
 	const torch::Tensor& imageBuffer,
-	const bool debug);
+	const torch::Tensor& alpha,
+	const bool debug,
+	const torch::Tensor& Ld_value);
 		
 torch::Tensor markVisible(
 		torch::Tensor& means3D,
