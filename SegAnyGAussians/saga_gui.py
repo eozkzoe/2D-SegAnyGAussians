@@ -804,6 +804,37 @@ class GaussianSplattingGUI:
             normal_map = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
             normal_map = (normal_map + 1) / 2
 
+        if self.clear_edit:
+            self.new_click_xy = []
+            self.clear_edit = False
+            self.prompt_num = 0
+            try:
+                self.engine["scene"].clear_segment()
+                self.engine["feature"].clear_segment()
+            except:
+                pass
+
+        if self.roll_back:
+            self.new_click_xy = []
+            self.roll_back = False
+            self.prompt_num = 0
+            # try:
+            self.engine["scene"].roll_back()
+            self.engine["feature"].roll_back()
+            # except:
+            # pass
+
+        if self.reload_flag:
+            self.reload_flag = False
+            print("loading model file...")
+            self.engine["scene"].load_ply(self.opt.SCENE_PCD_PATH)
+            self.engine["feature"].load_ply(self.opt.FEATURE_PCD_PATH)
+            self.engine["scale_gate"].load_state_dict(
+                torch.load(self.opt.SCALE_GATE_PATH)
+            )
+            self.do_pca()  # calculate self.proj_mat
+            self.load_model = True
+
         if len(self.new_click_xy) > 0:
             featmap = scale_gated_feat.reshape(H, W, -1)
 
@@ -866,16 +897,22 @@ class GaussianSplattingGUI:
 
                 # Apply normal-based filtering using clicked normals
                 normal_threshold = 0.8  # Adjust this threshold to control strictness
-                rendered_normals = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
-                normal_mask = torch.zeros_like(feature_mask)
+                point_normals = scene_outputs["normal"].reshape(
+                    -1, 3
+                )  # Reshape to [N, 3]
+                normal_mask = torch.zeros_like(feature_mask, device=feature_mask.device)
 
                 for clicked_normal in self.chosen_normals:
+                    # Expand clicked_normal to match point_normals shape
+                    clicked_normal_expanded = clicked_normal.unsqueeze(0).expand(
+                        point_normals.shape[0], -1
+                    )
                     alignment = torch.abs(
-                        torch.sum(rendered_normals * clicked_normal, dim=-1)
+                        torch.sum(point_normals * clicked_normal_expanded, dim=-1)
                     )
                     normal_mask = normal_mask | (alignment > normal_threshold)
 
-                final_mask = feature_mask & normal_mask.reshape(feature_mask.shape)
+                final_mask = feature_mask & normal_mask
                 self.score_pts_binary = final_mask
 
                 self.engine["scene"].segment(self.score_pts_binary)
