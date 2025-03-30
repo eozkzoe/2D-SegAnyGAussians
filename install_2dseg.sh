@@ -1,6 +1,7 @@
 #!/bin/bash
 
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+conda install -c "nvidia/label/cuda-11.8.0" cuda-toolkit
 
 cd ./2D-gaussian/
 pip install -r requirements.txt
