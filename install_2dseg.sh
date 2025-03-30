@@ -17,3 +17,4 @@ pip install third_party/segment-anything
 pip install dearpygui
 pip install open-clip-torch
 pip install joblib==1.1.0
+pip install "git+https://github.com/facebookresearch/pytorch3d.git"
