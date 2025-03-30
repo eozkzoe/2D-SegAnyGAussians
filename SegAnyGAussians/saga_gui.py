@@ -744,7 +744,7 @@ class GaussianSplattingGUI:
 
         # Calculate alignment scores
         alignments = torch.abs(torch.sum(valid_normals * dominant_normal, dim=-1))
-        normal_threshold = 0.8  # Adjust this threshold to control strictness
+        normal_threshold = 0.9  # Adjust this threshold to control strictness
         normal_mask = alignments > normal_threshold
 
         # Create final mask
@@ -896,7 +896,7 @@ class GaussianSplattingGUI:
                 feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
 
                 # Apply normal-based filtering using clicked normals
-                normal_threshold = 0.8  # Adjust this threshold to control strictness
+                normal_threshold = 0.9  # Adjust this threshold to control strictness
                 rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
                 normal_mask = torch.zeros_like(
                     rendered_normals[..., 0], device=rendered_normals.device
