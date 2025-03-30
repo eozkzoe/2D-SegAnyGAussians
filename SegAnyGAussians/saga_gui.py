@@ -280,6 +280,8 @@ class GaussianSplattingGUI:
         self.render_mode_cluster = False
         self.render_mode_normal = False
 
+        self.chosen_normals = None
+
         self.save_flag = False
 
     def __del__(self):
@@ -800,43 +802,9 @@ class GaussianSplattingGUI:
         normal_map = None
         if "normal" in scene_outputs:
             normal_map = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
-            # Normalize to [0, 1] range for visualization
             normal_map = (normal_map + 1) / 2
 
-        if self.clear_edit:
-            self.new_click_xy = []
-            self.clear_edit = False
-            self.prompt_num = 0
-            try:
-                self.engine["scene"].clear_segment()
-                self.engine["feature"].clear_segment()
-            except:
-                pass
-
-        if self.roll_back:
-            self.new_click_xy = []
-            self.roll_back = False
-            self.prompt_num = 0
-            # try:
-            self.engine["scene"].roll_back()
-            self.engine["feature"].roll_back()
-            # except:
-            # pass
-
-        if self.reload_flag:
-            self.reload_flag = False
-            print("loading model file...")
-            self.engine["scene"].load_ply(self.opt.SCENE_PCD_PATH)
-            self.engine["feature"].load_ply(self.opt.FEATURE_PCD_PATH)
-            self.engine["scale_gate"].load_state_dict(
-                torch.load(self.opt.SCALE_GATE_PATH)
-            )
-            self.do_pca()  # calculate self.proj_mat
-            self.load_model = True
-
-        score_map = None
         if len(self.new_click_xy) > 0:
-
             featmap = scale_gated_feat.reshape(H, W, -1)
 
             if self.new_click:
@@ -844,12 +812,20 @@ class GaussianSplattingGUI:
                 new_feat = featmap[int(xy[1]) % H, int(xy[0]) % W, :].reshape(
                     featmap.shape[-1], -1
                 )
-                if (self.prompt_num == 0) or (self.clickmode_multi_button == False):
+                # Get normal at clicked point
+                new_normal = normal_map[int(xy[1]) % H, int(xy[0]) % W]
+
+                if (self.prompt_num == 0) or (not self.clickmode_multi_button):
                     self.chosen_feature = new_feat
+                    self.chosen_normals = new_normal.unsqueeze(0)
                 else:
                     self.chosen_feature = torch.cat(
                         [self.chosen_feature, new_feat], dim=-1
-                    )  # extend to get more prompt features
+                    )
+                    self.chosen_normals = torch.cat(
+                        [self.chosen_normals, new_normal.unsqueeze(0)], dim=0
+                    )
+
                 self.prompt_num += 1
                 self.new_click = False
 
@@ -877,15 +853,6 @@ class GaussianSplattingGUI:
             )
 
             if self.segment3d_flag:
-                """gaussian point cloud core params
-                self.engine._xyz            # (N, 3)
-                self.engine._features_dc    # (N, 1, 3)
-                self.engine._features_rest  # (N, 15, 3)
-                self.engine._opacity        # (N, 1)
-                self.engine._scaling        # (N, 3)
-                self.engine._rotation       # (N, 4)
-                self.engine._objects_dc     # (N, 1, 16)
-                """
                 self.segment3d_flag = False
                 feat_pts = self.engine["feature"].get_point_features.squeeze()
                 scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
@@ -897,15 +864,20 @@ class GaussianSplattingGUI:
                 score_pts = (score_pts + 1.0) / 2
                 feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
 
-                # save_path = "./debug_robot_{:0>3d}.ply".format(self.object_seg_id)
-                # try:
-                #     self.engine['scene'].roll_back()
-                #     self.engine['feature'].roll_back()
-                # except:
-                #     pass
-                self.score_points_binary = self.segment3d_with_normal_filter(
-                    feature_mask, view_camera
-                )
+                # Apply normal-based filtering using clicked normals
+                normal_threshold = 0.8  # Adjust this threshold to control strictness
+                rendered_normals = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
+                normal_mask = torch.zeros_like(feature_mask)
+
+                for clicked_normal in self.chosen_normals:
+                    alignment = torch.abs(
+                        torch.sum(rendered_normals * clicked_normal, dim=-1)
+                    )
+                    normal_mask = normal_mask | (alignment > normal_threshold)
+
+                final_mask = feature_mask & normal_mask.reshape(feature_mask.shape)
+                self.score_pts_binary = final_mask
+
                 self.engine["scene"].segment(self.score_pts_binary)
                 self.engine["feature"].segment(self.score_pts_binary)
 
