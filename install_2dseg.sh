@@ -1,12 +1,13 @@
-cd /workspace/2D-SegAnyGAussians/
-pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-pip install -r requirements.txt
+#!/bin/bash
 
-cd /workspace/2D-SegAnyGAussians/2D-gaussian/
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+cd ./2D-gaussian/
+pip install -r requirements.txt
 pip install submodules/simple-knn
 bash update_pkg.sh
 
-cd /workspace/2D-SegAnyGAussians/SegAnyGAussians/
+cd ./SegAnyGAussians/
 pip install hdbscan
 pip install matplotlib
 pip install submodules/diff-gaussian-rasterization_contrastive_f
