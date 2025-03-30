@@ -802,7 +802,7 @@ class GaussianSplattingGUI:
         normal_map = None
         if "normal" in scene_outputs:
             normal_map = scene_outputs["normal"].permute(1, 2, 0)  # [H, W, 3]
-            normal_map = (normal_map + 1) / 2
+            normal_map = (normal_map + 1) / 2.0
 
         if self.clear_edit:
             self.new_click_xy = []
@@ -897,22 +897,23 @@ class GaussianSplattingGUI:
 
                 # Apply normal-based filtering using clicked normals
                 normal_threshold = 0.8  # Adjust this threshold to control strictness
-                point_normals = scene_outputs["normal"].reshape(
-                    -1, 3
-                )  # Reshape to [N, 3]
-                normal_mask = torch.zeros_like(feature_mask, device=feature_mask.device)
+                rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
+                normal_mask = torch.zeros_like(
+                    rendered_normals[..., 0], device=rendered_normals.device
+                )
 
                 for clicked_normal in self.chosen_normals:
-                    # Expand clicked_normal to match point_normals shape
-                    clicked_normal_expanded = clicked_normal.unsqueeze(0).expand(
-                        point_normals.shape[0], -1
-                    )
                     alignment = torch.abs(
-                        torch.sum(point_normals * clicked_normal_expanded, dim=-1)
+                        torch.sum(rendered_normals * clicked_normal, dim=-1)
                     )
                     normal_mask = normal_mask | (alignment > normal_threshold)
 
-                final_mask = feature_mask & normal_mask
+                # Convert normal mask to point mask
+                point_normal_mask = normal_mask.reshape(-1)
+                point_normal_mask = point_normal_mask[
+                    : feature_mask.shape[0]
+                ]  # Ensure same size as feature mask
+                final_mask = feature_mask & point_normal_mask
                 self.score_pts_binary = final_mask
 
                 self.engine["scene"].segment(self.score_pts_binary)
@@ -990,6 +991,8 @@ class GaussianSplattingGUI:
                 if self.render_buffer is None
                 else self.render_buffer + normal_map.cpu().numpy().reshape(-1)
             )
+            render_num += 1
+
         self.render_buffer /= render_num
 
         dpg.set_value("_texture", self.render_buffer)
