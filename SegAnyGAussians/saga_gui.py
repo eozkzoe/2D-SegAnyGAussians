@@ -864,8 +864,19 @@ class GaussianSplattingGUI:
             # print(score_map.shape, score_map.min(), score_map.max(), "score_map_shape")
 
             score_map = (score_map + 1.0) / 2
-            score_binary = score_map > dpg.get_value("_ScoreThres")
+            if self.render_mode_normal:
+                normal_score = torch.zeros_like(
+                    score_map[..., 0], device=score_map.device
+                )
+                for clicked_normal in self.chosen_normals:
+                    alignment = torch.abs(
+                        torch.sum(normal_map * clicked_normal, dim=-1)
+                    )
+                    normal_score = torch.maximum(normal_score, alignment)
 
+                score_map = score_map * normal_score.unsqueeze(-1)
+
+            score_binary = score_map > dpg.get_value("_ScoreThres")
             score_map[~score_binary] = 0.0
             score_map = torch.max(score_map, dim=-1).values
             score_norm = (score_map - dpg.get_value("_ScoreThres")) / (
@@ -895,20 +906,28 @@ class GaussianSplattingGUI:
                 score_pts = (score_pts + 1.0) / 2
                 feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
 
-                # Apply normal-based filtering using clicked normals
-                normal_threshold = 0.9  # Adjust this threshold to control strictness
-                rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
-                normal_mask = torch.zeros_like(
-                    rendered_normals[..., 0], 
-                    dtype=torch.bool,
-                    device=rendered_normals.device,
-                )
-
-                for clicked_normal in self.chosen_normals:
-                    alignment = torch.abs(
-                        torch.sum(rendered_normals * clicked_normal, dim=-1)
+                if self.render_mode_normal:
+                    # Apply normal-based filtering using clicked normals
+                    normal_threshold = (
+                        0.9  # Adjust this threshold to control strictness
                     )
-                    normal_mask = normal_mask | (alignment > normal_threshold).bool()
+                    rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
+                    normal_mask = torch.zeros_like(
+                        rendered_normals[..., 0],
+                        dtype=torch.bool,
+                        device=rendered_normals.device,
+                    )
+
+                    for clicked_normal in self.chosen_normals:
+                        alignment = torch.abs(
+                            torch.sum(rendered_normals * clicked_normal, dim=-1)
+                        )
+                        normal_mask = (
+                            normal_mask | (alignment > normal_threshold).bool()
+                        )
+
+                else:
+                    final_mask = feature_mask
 
                 # Convert normal mask to point mask
                 point_normal_mask = normal_mask.reshape(-1)
