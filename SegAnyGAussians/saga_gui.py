@@ -899,14 +899,16 @@ class GaussianSplattingGUI:
                 normal_threshold = 0.9  # Adjust this threshold to control strictness
                 rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
                 normal_mask = torch.zeros_like(
-                    rendered_normals[..., 0], device=rendered_normals.device
+                    rendered_normals[..., 0], 
+                    dtype=torch.bool,
+                    device=rendered_normals.device,
                 )
 
                 for clicked_normal in self.chosen_normals:
                     alignment = torch.abs(
                         torch.sum(rendered_normals * clicked_normal, dim=-1)
                     )
-                    normal_mask = normal_mask | (alignment > normal_threshold)
+                    normal_mask = normal_mask | (alignment > normal_threshold).bool()
 
                 # Convert normal mask to point mask
                 point_normal_mask = normal_mask.reshape(-1)
