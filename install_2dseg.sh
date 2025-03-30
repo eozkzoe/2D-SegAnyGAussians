@@ -8,7 +8,7 @@ pip install -r requirements.txt
 pip install submodules/simple-knn
 bash update_pkg.sh
 
-cd ./SegAnyGAussians/
+cd ../SegAnyGAussians/
 pip install hdbscan
 pip install matplotlib
 pip install submodules/diff-gaussian-rasterization_contrastive_f
