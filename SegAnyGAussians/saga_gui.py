@@ -16,6 +16,7 @@ from PIL import Image
 import colorsys
 import cv2
 from sklearn.decomposition import PCA
+from sklearn.mixture import GaussianMixture
 
 from scene import Scene, GaussianModel, FeatureGaussianModel
 import dearpygui.dearpygui as dpg
@@ -728,18 +729,15 @@ class GaussianSplattingGUI:
 
         # Get valid normals for selected points
         valid_mask = feature_selected_mask & (torch.norm(normal_map, dim=-1) > 0.1)
-        valid_normals = normal_map[valid_mask]
 
-        if valid_normals.shape[0] == 0:
+        # Use GMM to find dominant normal instead of PCA
+        dominant_normal = self.compute_dominant_normal_gmm(normal_map, valid_mask)
+
+        if dominant_normal is None:
             return feature_selected_mask
 
-        # Find dominant normal using PCA
-        pca = PCA(n_components=3)
-        pca.fit(valid_normals.cpu().numpy())
-        dominant_normal = torch.from_numpy(pca.components_[0]).to(valid_normals.device)
-
         # Calculate alignment scores
-        alignments = torch.abs(torch.sum(valid_normals * dominant_normal, dim=-1))
+        alignments = torch.abs(torch.sum(normal_map * dominant_normal, dim=-1))
         normal_threshold = 0.9  # Adjust this threshold to control strictness
         normal_mask = alignments > normal_threshold
 
@@ -900,10 +898,7 @@ class GaussianSplattingGUI:
                 feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
 
                 if self.render_mode_normal:
-                    # Apply normal-based filtering using clicked normals
-                    normal_threshold = (
-                        0.9  # Adjust this threshold to control strictness
-                    )
+                    # Apply GMM-based normal filtering
                     rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
                     normal_mask = torch.zeros_like(
                         rendered_normals[..., 0],
@@ -912,12 +907,17 @@ class GaussianSplattingGUI:
                     )
 
                     for clicked_normal in self.chosen_normals:
-                        alignment = torch.abs(
-                            torch.sum(rendered_normals * clicked_normal, dim=-1)
+                        valid_mask = torch.norm(rendered_normals, dim=-1) > 0.1
+                        dominant_normal, gmm_mask = self.compute_dominant_normal_gmm(
+                            rendered_normals, valid_mask
                         )
-                        normal_mask = (
-                            normal_mask | (alignment > normal_threshold).bool()
-                        )
+
+                        if dominant_normal is not None and gmm_mask is not None:
+                            # Apply GMM mask directly to valid regions
+                            valid_indices = torch.where(valid_mask.reshape(-1))[0]
+                            current_mask = torch.zeros_like(normal_mask, dtype=torch.bool)
+                            current_mask.reshape(-1)[valid_indices] = torch.from_numpy(gmm_mask).to(current_mask.device)
+                            normal_mask = normal_mask | current_mask
 
                 else:
                     final_mask = feature_mask
@@ -1027,6 +1027,41 @@ class GaussianSplattingGUI:
             normal = -normal
 
         return normal
+
+    def compute_dominant_normal_gmm(self, normal_map, valid_mask, n_components=3):
+        """
+        Compute dominant normal using GMM clustering followed by PCA fitting
+        Returns both normal and mask
+        """
+        valid_normals = normal_map[valid_mask].cpu().numpy()
+
+        if valid_normals.shape[0] == 0:
+            return None, None
+
+        # Fit GMM
+        gmm = GaussianMixture(n_components=n_components, random_state=0)
+        gmm.fit(valid_normals)
+
+        # Find dominant component
+        dominant_component = np.argmax(gmm.weights_)
+        probabilities = gmm.predict_proba(valid_normals)[:, dominant_component]
+
+        # Create mask for dominant component
+        threshold = 0.7
+        dominant_points = valid_normals[probabilities > threshold]
+        dominant_mask = probabilities > threshold
+
+        if dominant_points.shape[0] < 3:
+            dominant_normal = gmm.means_[dominant_component]
+        else:
+            pca = PCA(n_components=3)
+            pca.fit(dominant_points)
+            dominant_normal = pca.components_[2]
+            if np.dot(dominant_normal, gmm.means_[dominant_component]) < 0:
+                dominant_normal = -dominant_normal
+
+        dominant_normal = dominant_normal / np.linalg.norm(dominant_normal)
+        return torch.from_numpy(dominant_normal).to(normal_map.device), dominant_mask
 
     def save_segmentation(self, mask_name):
         try:

@@ -149,152 +149,91 @@ def visualize_pc(render_pkg, view, idx):
 
 
 def mesh_extraction(depths, colors, K, RTs):
-    # Create necessary directories
-    os.makedirs("test/data", exist_ok=True)
-    os.makedirs("test/mesh_result", exist_ok=True)
+    """
+    Creates a mesh from a series of depth images.
 
+    Parameters:
+    - depths: List of depth images. (n, 1, H, W)
+    - colors: List of color images. (n, 3, H, W)
+    - K: Camera intrinsic matrix. (3, 3)
+    - RTs: Camera poses corresponding to each depth image.  (n, 4, 4)
+
+    """
     # Voxel size used in TSDF fusion.
     voxel_length = 0.004
     # Truncation threshold for TSDF.
     sdf_trunc = 0.02
-
-    try:
-        # Initialize a TSDF volume
-        tsdf_volume = o3d.pipelines.integration.ScalableTSDFVolume(
-            voxel_length=voxel_length,
-            sdf_trunc=sdf_trunc,
-            color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8,
+    # Initialize a TSDF volume
+    tsdf_volume = o3d.pipelines.integration.ScalableTSDFVolume(
+        voxel_length=voxel_length,
+        sdf_trunc=sdf_trunc,
+        color_type=o3d.pipelines.integration.TSDFVolumeColorType.RGB8,
+    )
+    H, W = depths[0].shape[1:]
+    img_num = len(depths)
+    idx = np.arange(0, 190, 5)
+    # Process each depth image
+    for i in idx:
+        depth = depths[i]
+        RT = RTs[i]
+        color = colors[i]
+        print("Integrate {:d}-th image into the volume.".format(i))
+        # Create an Open3D depth image
+        color_np = color.reshape(H, W, 3).cpu().numpy()
+        color_clip = np.clip(color_np, 0.0, 1.0) * 255
+        depth_o3d = o3d.geometry.Image(
+            depth.squeeze(0).cpu().numpy().astype(np.float32)
         )
+        color_o3d = o3d.geometry.Image(color_clip.astype(np.uint8))
 
-        H, W = depths[0].shape[1:]
-        img_num = len(depths)
-        idx = np.arange(0, min(190, img_num), 5)  # Ensure we don't exceed array bounds
-
-        # Process each depth image
-        for i in idx:
-            depth = depths[i]
-            RT = RTs[i]
-            color = colors[i]
-            print("Integrate {:d}-th image into the volume.".format(i))
-
-            # Ensure data is on CPU and in correct format
-            color_np = color.reshape(H, W, 3).cpu().numpy()
-            color_clip = np.clip(color_np, 0.0, 1.0) * 255
-            depth_np = depth.squeeze(0).cpu().numpy()
-
-            # Skip if depth is invalid
-            if np.isnan(depth_np).any() or np.isinf(depth_np).any():
-                print(f"Skipping frame {i} due to invalid depth values")
-                continue
-
-            depth_o3d = o3d.geometry.Image(depth_np.astype(np.float32))
-            color_o3d = o3d.geometry.Image(color_clip.astype(np.uint8))
-
-            rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
-                color_o3d,
-                depth_o3d,
-                depth_scale=1.0,
-                depth_trunc=5.0,  # Add depth truncation
-                convert_rgb_to_intensity=False,
-            )
-
-            # Create a camera intrinsic object
-            intrinsic_o3d = o3d.camera.PinholeCameraIntrinsic()
-            intrinsic_o3d.set_intrinsics(
-                W, H, fx=K[0, 0], fy=K[1, 1], cx=K[0, 2], cy=K[1, 2]
-            )
-
-            # Ensure RT matrix is in correct format
-            RT_o3d = np.array(RT).astype(np.float64)
-
-            tsdf_volume.integrate(rgbd_image, intrinsic_o3d, RT_o3d)
-
-        # Extract and optimize the mesh
-        print("Extracting mesh...")
-        mesh = tsdf_volume.extract_triangle_mesh()
-        mesh.compute_vertex_normals()
-        mesh.remove_degenerate_triangles()
-        mesh.remove_duplicated_triangles()
-        mesh.remove_duplicated_vertices()
-        mesh.remove_non_manifold_edges()
-
-        # Save the mesh
-        print("Saving mesh...")
-        o3d.io.write_triangle_mesh(f"test/mesh_result/mesh_{img_num}.ply", mesh)
-        print(
-            f"Mesh saved successfully with {len(mesh.vertices)} vertices and {len(mesh.triangles)} triangles"
+        rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
+            color_o3d, depth_o3d, depth_scale=1.0, convert_rgb_to_intensity=False
         )
+        # Create a camera intrinsic object
+        intrinsic_o3d = o3d.camera.PinholeCameraIntrinsic()
+        intrinsic_o3d.set_intrinsics(
+            W, H, fx=K[0, 0], fy=K[1, 1], cx=K[0, 2], cy=K[1, 2]
+        )
+        # Integrate the current depth image into the TSDF volume
+        RT_o3d = RT.astype(np.float64)
+        tsdf_volume.integrate(rgbd_image, intrinsic_o3d, RT_o3d)
 
-    except Exception as e:
-        print(f"Error during mesh extraction: {str(e)}")
+    # Extract the mesh from the TSDF volume
+    mesh = tsdf_volume.extract_triangle_mesh()
+    # Compute vertex normals to improve rendering
+    mesh.compute_vertex_normals()
+    # Save the mesh to a file
+    o3d.io.write_triangle_mesh(f"test/mesh_result/mesh_{img_num}.ply", mesh)
+    pass
 
 
 if __name__ == "__main__":
-    parser = ArgumentParser(description="Gaussian Splatting Visualization")
-    parser.add_argument("--load", action="store_true", help="Load pre-rendered data")
-    parser.add_argument("--model_path", type=str, help="Path to the model")
-    parser.add_argument(
-        "--iteration", default=-1, type=int, help="Model iteration to load"
-    )
-    parser.add_argument(
-        "--skip_train", action="store_true", help="Skip training set rendering"
-    )
-    parser.add_argument(
-        "--skip_test", action="store_true", help="Skip test set rendering"
-    )
-    parser.add_argument(
-        "--voxel_size", type=float, default=0.004, help="Voxel size for TSDF fusion"
-    )
-    parser.add_argument(
-        "--sdf_trunc", type=float, default=0.02, help="Truncation value for TSDF fusion"
-    )
-    parser.add_argument(
-        "--frame_stride",
-        type=int,
-        default=5,
-        help="Stride for selecting frames in mesh extraction",
-    )
-    parser.add_argument("--quiet", action="store_true", help="Disable verbose output")
-    parser.add_argument(
-        "--output_dir", type=str, default="test", help="Output directory"
-    )
-
-    args = parser.parse_args()
-
-    # Create output directories
-    os.makedirs(f"{args.output_dir}/data", exist_ok=True)
-    os.makedirs(f"{args.output_dir}/point_cloud_result", exist_ok=True)
-    os.makedirs(f"{args.output_dir}/mesh_result", exist_ok=True)
-
-    if args.load:
-        try:
-            depths = torch.load(f"{args.output_dir}/data/depths.pt")
-            poses = torch.load(f"{args.output_dir}/data/poses.pt")
-            colors = torch.load(f"{args.output_dir}/data/colors.pt")
-            K = torch.load(f"{args.output_dir}/data/K.pt")
-            mesh_extraction(depths, colors, K, poses)
-        except Exception as e:
-            print(f"Error loading pre-rendered data: {str(e)}")
+    load = True
+    if load:
+        # visualize()
+        depths = torch.load("test/data/depths.pt")
+        poses = torch.load("test/data/poses.pt")
+        colors = torch.load("test/data/colors.pt")
+        K = torch.load("test/data/K.pt")
+        mesh_extraction(depths, colors, K, poses)
     else:
-        try:
-            # Set up model parameters
-            model = ModelParams(parser, sentinel=True)
-            pipeline = PipelineParams(parser)
-            model_args = get_combined_args(parser)
+        # Set up command line argument parser
+        parser = ArgumentParser(description="Testing script parameters")
+        model = ModelParams(parser, sentinel=True)
+        pipeline = PipelineParams(parser)
+        parser.add_argument("--iteration", default=-1, type=int)
+        parser.add_argument("--skip_train", action="store_true")
+        parser.add_argument("--skip_test", action="store_true")
+        parser.add_argument("--quiet", action="store_true")
+        args = get_combined_args(parser)
+        print("Rendering " + args.model_path)
 
-            if not args.quiet:
-                print("Rendering " + args.model_path)
-
-            # Initialize system state (RNG)
-            safe_state(args.quiet)
-
-            # Render the scenes
-            render_sets(
-                model.extract(model_args),
-                args.iteration,
-                pipeline.extract(model_args),
-                args.skip_train,
-                args.skip_test,
-            )
-        except Exception as e:
-            print(f"Error during rendering: {str(e)}")
+        # Initialize system state (RNG)
+        safe_state(args.quiet)
+        render_sets(
+            model.extract(args),
+            args.iteration,
+            pipeline.extract(args),
+            args.skip_train,
+            args.skip_test,
+        )
