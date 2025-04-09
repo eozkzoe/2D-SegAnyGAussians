@@ -1,0 +1,31 @@
+#name: 2dseg_pipeline
+
+services:
+  2dseg:
+    build:
+      context: ./2DSEG_DI
+      dockerfile: Dockerfile
+    image: 2dseg_image
+    container_name: ${TDGS_CONTAINER_NAME:-2dseg_v1}
+    network_mode: host
+    stdin_open: true  # docker run -i
+    tty: true         # docker run -t
+    privileged: ${PRIVILEGED_MODE:-true}
+    volumes:
+      - ~/data_thin_structure:/data
+      - ./2DSEG_DI:/root
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /tmp/.docker.xauth:/tmp/.docker.xauth
+    environment:
+      - QT_X11_NO_MITSHM=1
+      - XAUTHORITY=/tmp/.docker.xauth
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+    command: ["bash", "/root/start_2DSEG.sh"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

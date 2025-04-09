@@ -1,0 +1,9 @@
+[submodule "third_party/kmeans_pytorch"]
+	path = SegAnyGAussians/third_party/kmeans_pytorch
+	url = git@github.com:subhadarship/kmeans_pytorch.git
+[submodule "third_party/segment-anything"]
+	path = SegAnyGAussians/third_party/segment-anything
+	url = git@github.com:facebookresearch/segment-anything.git
+[submodule "2DSEG_DI/sam2"]
+	path = 2DSEG_DI/sam2
+	url = https://github.com/facebookresearch/sam2.git
