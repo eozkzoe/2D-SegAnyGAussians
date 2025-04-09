@@ -277,6 +277,7 @@ class GaussianSplattingGUI:
         self.render_mode_pca = False
         self.render_mode_cluster = False
         self.render_mode_normal = False
+        self.render_mode_circle = False
 
         self.chosen_normals = None
 
@@ -403,6 +404,9 @@ class GaussianSplattingGUI:
         def render_mode_normal_callback(sender):
             self.render_mode_normal = not self.render_mode_normal
 
+        def render_mode_circle_callback(sender):
+            self.render_mode_circle = not self.render_mode_circle
+
         # control window
         with dpg.window(
             label="Control",
@@ -451,7 +455,11 @@ class GaussianSplattingGUI:
                 callback=render_mode_normal_callback,
                 user_data="Some Data",
             )
-
+            dpg.add_checkbox(
+                label="CIRCLES",
+                callback=render_mode_circle_callback,
+                user_data="Some Data",
+            )
             dpg.add_text("\nSegment option: ", tag="seg")
             dpg.add_checkbox(
                 label="clickmode", callback=clickmode_callback, user_data="Some Data"
@@ -747,6 +755,42 @@ class GaussianSplattingGUI:
 
         return final_mask
 
+    def apply_circle_filter(self, score_map):
+        """Apply Hough Circle Transform to filter circular regions"""
+        # Convert score map to uint8 image
+        score_img = (score_map.cpu().numpy() * 255).astype(np.uint8)
+
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(score_img, (9, 9), 2)
+
+        # Detect circles using Hough Circle Transform
+        circles = cv2.HoughCircles(
+            blurred,
+            cv2.HOUGH_GRADIENT,
+            dp=1,
+            minDist=50,
+            param1=50,
+            param2=30,
+            minRadius=20,
+            maxRadius=100,
+        )
+
+        # Create circle mask
+        circle_mask = torch.zeros_like(score_map, dtype=torch.bool)
+
+        if circles is not None:
+            circles = np.uint16(np.around(circles))
+            for circle in circles[0, :]:
+                center_x, center_y, radius = circle
+                y, x = torch.meshgrid(
+                    torch.arange(score_map.shape[0], device=score_map.device),
+                    torch.arange(score_map.shape[1], device=score_map.device),
+                )
+                dist_from_center = torch.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+                circle_mask |= dist_from_center <= radius
+
+        return circle_mask.to(score_map.device)
+
     @torch.no_grad()
     def fetch_data(self, view_camera):
         score_map = None
@@ -915,12 +959,32 @@ class GaussianSplattingGUI:
                         if dominant_normal is not None and gmm_mask is not None:
                             # Apply GMM mask directly to valid regions
                             valid_indices = torch.where(valid_mask.reshape(-1))[0]
-                            current_mask = torch.zeros_like(normal_mask, dtype=torch.bool)
-                            current_mask.reshape(-1)[valid_indices] = torch.from_numpy(gmm_mask).to(current_mask.device)
+                            current_mask = torch.zeros_like(
+                                normal_mask, dtype=torch.bool
+                            )
+                            current_mask.reshape(-1)[valid_indices] = torch.from_numpy(
+                                gmm_mask
+                            ).to(current_mask.device)
                             normal_mask = normal_mask | current_mask
 
                 else:
                     final_mask = feature_mask
+
+                if self.render_mode_circle:
+                    # Reshape score_pts to 2D for circle detection
+                    score_reshaped = score_pts.reshape(-1, self.chosen_feature.shape[1])
+                    score_max = torch.max(score_reshaped, dim=1)[0]
+                    score_2d = score_max.reshape(H, W)
+
+                    # Apply circle filter
+                    circle_mask = self.apply_circle_filter(score_2d)
+
+                    # Convert 2D mask to point mask
+                    point_circle_mask = circle_mask.reshape(-1)
+                    point_circle_mask = point_circle_mask[: feature_mask.shape[0]]
+
+                    # Combine with existing mask
+                    final_mask = final_mask & point_circle_mask
 
                 point_normal_mask = normal_mask.reshape(-1)
                 point_normal_mask = point_normal_mask[: feature_mask.shape[0]]
@@ -1033,7 +1097,7 @@ class GaussianSplattingGUI:
         Compute dominant normal using GMM clustering followed by PCA fitting
         Returns both normal and mask
         """
-        valid_normals = normal_map[valid_mask].cpu().numpy()
+        valid_normals = normal_map[valid_mask].cpu().numpy() / ap
 
         if valid_normals.shape[0] == 0:
             return None, None
