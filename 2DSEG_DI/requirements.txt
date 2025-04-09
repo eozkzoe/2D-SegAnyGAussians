@@ -12,3 +12,4 @@ matplotlib
 dearpygui
 open-clip-torch
 joblib==1.2.0
+ultralytics

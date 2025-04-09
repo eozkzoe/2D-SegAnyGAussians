@@ -30,6 +30,8 @@ from hdbscan import HDBSCAN
 
 from pose_estimator import PoseEstimator
 
+from ultralytics import YOLO
+
 
 def depth2img(depth):
     depth = (depth - depth.min()) / (depth.max() - depth.min() + 1e-7)
@@ -278,6 +280,8 @@ class GaussianSplattingGUI:
         self.render_mode_cluster = False
         self.render_mode_normal = False
         self.render_mode_circle = False
+        self.render_mode_holes = False
+        self.hole_model = YOLO('./hole_model.pt')
 
         self.chosen_normals = None
 
@@ -407,6 +411,9 @@ class GaussianSplattingGUI:
         def render_mode_circle_callback(sender):
             self.render_mode_circle = not self.render_mode_circle
 
+        def render_mode_holes_callback(sender):
+            self.render_mode_holes = not self.render_mode_holes
+
         # control window
         with dpg.window(
             label="Control",
@@ -459,6 +466,11 @@ class GaussianSplattingGUI:
                 label="CIRCLES",
                 callback=render_mode_circle_callback,
                 user_data="Some Data",
+            )
+            dpg.add_checkbox(
+                label="HOLES",
+                callback=render_mode_holes_callback,
+                user_data="Some Data"
             )
             dpg.add_text("\nSegment option: ", tag="seg")
             dpg.add_checkbox(
@@ -739,6 +751,7 @@ class GaussianSplattingGUI:
         valid_mask = feature_selected_mask & (torch.norm(normal_map, dim=-1) > 0.1)
 
         # Use GMM to find dominant normal instead of PCA
+        self.hole_model = YOLO('./hole_model.pt')
         dominant_normal = self.compute_dominant_normal_gmm(normal_map, valid_mask)
 
         if dominant_normal is None:
@@ -754,6 +767,27 @@ class GaussianSplattingGUI:
         final_mask[valid_mask] = normal_mask
 
         return final_mask
+
+    # Add after __init__ method
+    def detect_holes(self, img):
+        """Detect holes using YOLO model and return visualization mask"""
+        # Convert torch tensor to numpy array and ensure correct format
+        img_np = (img.cpu().numpy() * 255).astype(np.uint8)
+        
+        results = self.hole_model(img_np)
+        
+        hole_viz = torch.zeros_like(img)
+        
+        for result in results:
+            boxes = result.boxes
+            for box in boxes:
+                x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                
+                # Fill detection area with blue color
+                hole_viz[y1:y2, x1:x2, 2] = 1.0  # Blue channel
+        
+        return hole_viz
 
     def apply_circle_filter(self, score_map):
         """Apply Hough Circle Transform to filter circular regions"""
@@ -986,6 +1020,14 @@ class GaussianSplattingGUI:
                     # Combine with existing mask
                     final_mask = final_mask & point_circle_mask
 
+                if self.render_mode_holes:
+                    # Apply hole detection filter
+                    hole_viz = self.detect_holes(img)
+                    hole_mask = hole_viz[..., 2] > 0  # Blue channel mask
+                    point_hole_mask = hole_mask.reshape(-1)
+                    point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
+                    final_mask = final_mask & point_hole_mask
+
                 point_normal_mask = normal_mask.reshape(-1)
                 point_normal_mask = point_normal_mask[: feature_mask.shape[0]]
                 final_mask = feature_mask & point_normal_mask
@@ -1065,6 +1107,27 @@ class GaussianSplattingGUI:
                 normal_map.cpu().numpy().reshape(-1)
                 if self.render_buffer is None
                 else self.render_buffer + normal_map.cpu().numpy().reshape(-1)
+            )
+            render_num += 1
+
+        if self.render_mode_circle and score_map is not None:
+            circle_mask = self.apply_circle_filter(score_map.squeeze())
+            circle_viz = torch.zeros_like(normal_map)
+            circle_viz[..., 0] = circle_mask.float()
+            self.render_buffer = (
+                circle_viz.cpu().numpy().reshape(-1)
+                if self.render_buffer is None
+                else self.render_buffer + circle_viz.cpu().numpy().reshape(-1)
+            )
+            render_num += 1
+
+        if self.render_mode_holes:
+            hole_viz = self.detect_holes(img)
+            hole_viz = hole_viz * 0.5  # Make it translucent
+            self.render_buffer = (
+                hole_viz.cpu().numpy().reshape(-1)
+                if self.render_buffer is None
+                else self.render_buffer + hole_viz.cpu().numpy().reshape(-1)
             )
             render_num += 1
 
