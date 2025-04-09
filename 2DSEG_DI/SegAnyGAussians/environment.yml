@@ -1,0 +1,22 @@
+channels:
+  - pytorch
+  - conda-forge
+  - defaults
+  - nvidia
+dependencies:
+  - plyfile=0.8.1
+  - python=3.9
+  - pip=22.3.1
+  - tqdm
+  - hdbscan
+  - matplotlib
+  - pip:
+    - submodules/diff-gaussian-rasterization
+    - submodules/diff-gaussian-rasterization_contrastive_f
+    - submodules/diff-gaussian-rasterization-depth
+    - submodules/simple-knn
+    - third_party/segment-anything
+    - dearpygui
+    - opencv-python
+    - open-clip-torch
+    - joblib==1.1.0
