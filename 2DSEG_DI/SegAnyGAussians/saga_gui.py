@@ -268,6 +268,7 @@ class GaussianSplattingGUI:
         self.roll_back = False
         self.preview = False  # binary segmentation mode
         self.segment3d_flag = False
+        self.select_holes_flag = False
         self.reload_flag = False  # reload the whole scene / point cloud
         self.object_seg_id = (
             0  # to store the segmented object with increasing index order (path at: ./)
@@ -281,7 +282,7 @@ class GaussianSplattingGUI:
         self.render_mode_normal = False
         self.render_mode_circle = False
         self.render_mode_holes = False
-        self.hole_model = YOLO('./hole_model.pt')
+        self.hole_model = YOLO("./hole_model.pt")
 
         self.chosen_normals = None
 
@@ -371,6 +372,9 @@ class GaussianSplattingGUI:
 
         def callback_segment3d():
             self.segment3d_flag = True
+
+        def callback_select_holes():
+            self.select_holes_flag = True
 
         def callback_save():
             self.save_flag = True
@@ -470,7 +474,7 @@ class GaussianSplattingGUI:
             dpg.add_checkbox(
                 label="HOLES",
                 callback=render_mode_holes_callback,
-                user_data="Some Data"
+                user_data="Some Data",
             )
             dpg.add_text("\nSegment option: ", tag="seg")
             dpg.add_checkbox(
@@ -491,6 +495,7 @@ class GaussianSplattingGUI:
             dpg.add_button(
                 label="segment3d", callback=callback_segment3d, user_data="Some Data"
             )
+            dpg.add_button(label="Select Holes", callback=callback_select_holes, user_data="Some Data")
             dpg.add_button(label="roll_back", callback=roll_back, user_data="Some Data")
             dpg.add_button(label="clear", callback=clear_edit, user_data="Some Data")
             dpg.add_button(
@@ -751,7 +756,7 @@ class GaussianSplattingGUI:
         valid_mask = feature_selected_mask & (torch.norm(normal_map, dim=-1) > 0.1)
 
         # Use GMM to find dominant normal instead of PCA
-        self.hole_model = YOLO('./hole_model.pt')
+        self.hole_model = YOLO("./hole_model.pt")
         dominant_normal = self.compute_dominant_normal_gmm(normal_map, valid_mask)
 
         if dominant_normal is None:
@@ -773,33 +778,43 @@ class GaussianSplattingGUI:
         """Detect holes using YOLO model and return visualization mask"""
         # Convert torch tensor to numpy array and ensure correct format
         img_np = (img.cpu().numpy() * 255).astype(np.uint8)
-        
+
         results = self.hole_model(img_np)
-        
+
         hole_viz = torch.zeros_like(img)
-        
+
         for result in results:
             boxes = result.boxes
             for box in boxes:
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-                
+
                 # Fill detection area with blue color
                 hole_viz[y1:y2, x1:x2, 2] = 1.0  # Blue channel
-        
+
         return hole_viz
 
-    def apply_circle_filter(self, score_map):
-        """Apply Hough Circle Transform to filter circular regions"""
-        # Convert score map to uint8 image
-        score_img = (score_map.cpu().numpy() * 255).astype(np.uint8)
+    def apply_circle_filter(self, img):
+        """Apply Hough Circle Transform to filter circular regions using RGB image"""
+        # Convert RGB image to grayscale
+        if isinstance(img, torch.Tensor):
+            img_gray = (img.cpu().numpy() * 255).astype(np.uint8)
+            if len(img_gray.shape) == 3:
+                img_gray = cv2.cvtColor(img_gray, cv2.COLOR_RGB2GRAY)
+        else:
+            img_gray = (img * 255).astype(np.uint8)
+            if len(img_gray.shape) == 3:
+                img_gray = cv2.cvtColor(img_gray, cv2.COLOR_RGB2GRAY)
 
         # Apply Gaussian blur to reduce noise
-        blurred = cv2.GaussianBlur(score_img, (9, 9), 2)
+        blurred = cv2.GaussianBlur(img_gray, (9, 9), 2)
 
-        # Detect circles using Hough Circle Transform
+        # Apply Canny edge detection
+        edges = cv2.Canny(blurred, 50, 150)
+
+        # Detect circles using Hough Circle Transform on edge image
         circles = cv2.HoughCircles(
-            blurred,
+            edges,
             cv2.HOUGH_GRADIENT,
             dp=1,
             minDist=50,
@@ -810,20 +825,22 @@ class GaussianSplattingGUI:
         )
 
         # Create circle mask
-        circle_mask = torch.zeros_like(score_map, dtype=torch.bool)
+        circle_mask = torch.zeros(
+            (img_gray.shape[0], img_gray.shape[1]), dtype=torch.bool
+        )
 
         if circles is not None:
             circles = np.uint16(np.around(circles))
-            for circle in circles[0, :]:
-                center_x, center_y, radius = circle
-                y, x = torch.meshgrid(
-                    torch.arange(score_map.shape[0], device=score_map.device),
-                    torch.arange(score_map.shape[1], device=score_map.device),
-                )
-                dist_from_center = torch.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
-                circle_mask |= dist_from_center <= radius
+        for circle in circles[0, :]:
+            center_x, center_y, radius = circle
+            y, x = torch.meshgrid(
+                torch.arange(img_gray.shape[0]),
+                torch.arange(img_gray.shape[1]),
+            )
+            dist_from_center = torch.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+            circle_mask |= dist_from_center <= radius
 
-        return circle_mask.to(score_map.device)
+        return circle_mask.to(img.device if isinstance(img, torch.Tensor) else "cpu")
 
     @torch.no_grad()
     def fetch_data(self, view_camera):
@@ -963,6 +980,18 @@ class GaussianSplattingGUI:
                 depth2img(depth_score.cpu().numpy()).astype(np.float32) / 255.0
             )
 
+            if self.circle_select_flag:
+                self.circle_select_flag = False
+                circle_mask = self.apply_circle_filter(img)
+                
+                # Convert 2D mask to point mask
+                point_circle_mask = circle_mask.reshape(-1)
+                point_circle_mask = point_circle_mask[: self.engine["scene"].get_xyz.shape[0]]
+                
+                self.score_pts_binary = point_circle_mask
+                self.engine["scene"].segment(self.score_pts_binary)
+                self.engine["feature"].segment(self.score_pts_binary)
+
             if self.segment3d_flag:
                 self.segment3d_flag = False
                 feat_pts = self.engine["feature"].get_point_features.squeeze()
@@ -1005,15 +1034,7 @@ class GaussianSplattingGUI:
                     final_mask = feature_mask
 
                 if self.render_mode_circle:
-                    # Reshape score_pts to 2D for circle detection
-                    score_reshaped = score_pts.reshape(-1, self.chosen_feature.shape[1])
-                    score_max = torch.max(score_reshaped, dim=1)[0]
-                    score_2d = score_max.reshape(H, W)
-
-                    # Apply circle filter
-                    circle_mask = self.apply_circle_filter(score_2d)
-
-                    # Convert 2D mask to point mask
+                    circle_mask = self.apply_circle_filter(img)
                     point_circle_mask = circle_mask.reshape(-1)
                     point_circle_mask = point_circle_mask[: feature_mask.shape[0]]
 
@@ -1023,7 +1044,7 @@ class GaussianSplattingGUI:
                 if self.render_mode_holes:
                     # Apply hole detection filter
                     hole_viz = self.detect_holes(img)
-                    hole_mask = hole_viz[..., 2] > 0  # Blue channel mask
+                    hole_mask = hole_viz[..., 1] > 0
                     point_hole_mask = hole_mask.reshape(-1)
                     point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
                     final_mask = final_mask & point_hole_mask
@@ -1111,9 +1132,9 @@ class GaussianSplattingGUI:
             render_num += 1
 
         if self.render_mode_circle and score_map is not None:
-            circle_mask = self.apply_circle_filter(score_map.squeeze())
+            circle_mask = self.apply_circle_filter(img)
             circle_viz = torch.zeros_like(normal_map)
-            circle_viz[..., 0] = circle_mask.float()
+            circle_viz[..., 2] = circle_mask.float()
             self.render_buffer = (
                 circle_viz.cpu().numpy().reshape(-1)
                 if self.render_buffer is None
