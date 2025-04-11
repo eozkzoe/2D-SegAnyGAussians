@@ -269,6 +269,7 @@ class GaussianSplattingGUI:
         self.preview = False  # binary segmentation mode
         self.segment3d_flag = False
         self.select_holes_flag = False
+        self.circle_select_flag = False
         self.reload_flag = False  # reload the whole scene / point cloud
         self.object_seg_id = (
             0  # to store the segmented object with increasing index order (path at: ./)
@@ -495,7 +496,11 @@ class GaussianSplattingGUI:
             dpg.add_button(
                 label="segment3d", callback=callback_segment3d, user_data="Some Data"
             )
-            dpg.add_button(label="Select Holes", callback=callback_select_holes, user_data="Some Data")
+            dpg.add_button(
+                label="Select Holes",
+                callback=callback_select_holes,
+                user_data="Some Data",
+            )
             dpg.add_button(label="roll_back", callback=roll_back, user_data="Some Data")
             dpg.add_button(label="clear", callback=clear_edit, user_data="Some Data")
             dpg.add_button(
@@ -983,11 +988,13 @@ class GaussianSplattingGUI:
             if self.circle_select_flag:
                 self.circle_select_flag = False
                 circle_mask = self.apply_circle_filter(img)
-                
+
                 # Convert 2D mask to point mask
                 point_circle_mask = circle_mask.reshape(-1)
-                point_circle_mask = point_circle_mask[: self.engine["scene"].get_xyz.shape[0]]
-                
+                point_circle_mask = point_circle_mask[
+                    : self.engine["scene"].get_xyz.shape[0]
+                ]
+
                 self.score_pts_binary = point_circle_mask
                 self.engine["scene"].segment(self.score_pts_binary)
                 self.engine["feature"].segment(self.score_pts_binary)
