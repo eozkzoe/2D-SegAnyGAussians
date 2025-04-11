@@ -1002,6 +1002,28 @@ class GaussianSplattingGUI:
                 point_hole_mask = hole_mask.reshape(-1)
                 point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
                 final_mask = feature_mask & point_hole_mask
+                results = self.hole_model(img.cpu().numpy() * 255)
+                hole_centers = []
+                for result in results:
+                    boxes = result.boxes
+                    for box in boxes:
+                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                        center_x = (x1 + x2) / 2
+                        center_y = (y1 + y2) / 2
+                        hole_centers.append((center_x, center_y))
+                print(f"Detected {len(hole_centers)} holes at positions: {hole_centers}")
+                if len(hole_centers) > 0:
+                    os.makedirs("./hole_detections", exist_ok=True)
+                    img_with_dots = img.cpu().numpy().copy() * 255
+                    img_with_dots = img_with_dots.astype(np.uint8)
+                    for center in hole_centers:
+                        cx, cy = int(center[0]), int(center[1])
+                        # Draw red circle at each hole center
+                        cv2.circle(img_with_dots, (cx, cy), 5, (255, 0, 0), -1)  # Red dot
+                    
+                    timestamp = time.strftime("%Y%m%d-%H%M%S")
+                    cv2.imwrite(f"./hole_detections/holes_{timestamp}.png", cv2.cvtColor(img_with_dots, cv2.COLOR_RGB2BGR))
+                    print(f"Saved image with hole centers to: ./hole_detections/holes_{timestamp}.png")
                 self.engine["scene"].segment(final_mask)
                 self.engine["feature"].segment(final_mask)
 
