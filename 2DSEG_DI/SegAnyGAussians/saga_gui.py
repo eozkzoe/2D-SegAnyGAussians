@@ -986,6 +986,7 @@ class GaussianSplattingGUI:
 
             if self.select_holes_flag:
                 self.select_holes_flag = False
+                print("Segmenting holes...")
                 holes_mask = self.detect_holes(img)
 
                 holes_point_mask = holes_mask[..., 2].reshape(-1)
@@ -1008,15 +1009,16 @@ class GaussianSplattingGUI:
                 score_pts = scale_gated_feat_pts @ self.chosen_feature
                 score_pts = (score_pts + 1.0) / 2
                 feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
+                final_mask = feature_mask
 
-                rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
-                normal_mask = torch.zeros_like(
-                    rendered_normals[..., 0],
-                    dtype=torch.bool,
-                    device=rendered_normals.device,
-                )
                 if self.render_mode_normal:
                     # Apply GMM-based normal filtering
+                    rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
+                    normal_mask = torch.zeros_like(
+                        rendered_normals[..., 0],
+                        dtype=torch.bool,
+                        device=rendered_normals.device,
+                    )
                     for clicked_normal in self.chosen_normals:
                         valid_mask = torch.norm(rendered_normals, dim=-1) > 0.1
                         dominant_normal, gmm_mask = self.compute_dominant_normal_gmm(
@@ -1034,8 +1036,9 @@ class GaussianSplattingGUI:
                             ).to(current_mask.device)
                             normal_mask = normal_mask | current_mask
 
-                else:
-                    final_mask = feature_mask
+                    point_normal_mask = normal_mask.reshape(-1)
+                    point_normal_mask = point_normal_mask[: feature_mask.shape[0]]
+                    final_mask = final_mask & point_normal_mask
 
                 if self.render_mode_circle:
                     circle_mask = self.apply_circle_filter(img)
@@ -1053,9 +1056,6 @@ class GaussianSplattingGUI:
                     point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
                     final_mask = final_mask & point_hole_mask
 
-                point_normal_mask = normal_mask.reshape(-1)
-                point_normal_mask = point_normal_mask[: feature_mask.shape[0]]
-                final_mask = final_mask & point_normal_mask
                 self.score_pts_binary = final_mask
 
                 self.engine["scene"].segment(self.score_pts_binary)
@@ -1185,7 +1185,7 @@ class GaussianSplattingGUI:
         Compute dominant normal using GMM clustering followed by PCA fitting
         Returns both normal and mask
         """
-        valid_normals = normal_map[valid_mask].cpu().numpy() / ap
+        valid_normals = normal_map[valid_mask].cpu().numpy()
 
         if valid_normals.shape[0] == 0:
             return None, None
