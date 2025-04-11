@@ -836,16 +836,18 @@ class GaussianSplattingGUI:
 
         if circles is not None:
             circles = np.uint16(np.around(circles))
-        for circle in circles[0, :]:
-            center_x, center_y, radius = circle
-            y, x = torch.meshgrid(
-                torch.arange(img_gray.shape[0]),
-                torch.arange(img_gray.shape[1]),
-            )
-            dist_from_center = torch.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
-            circle_mask |= dist_from_center <= radius
+            for circle in circles[0, :]:
+                center_x, center_y, radius = circle
+                y, x = torch.meshgrid(
+                    torch.arange(img_gray.shape[0]),
+                    torch.arange(img_gray.shape[1]),
+                )
+                dist_from_center = torch.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+                circle_mask |= dist_from_center <= radius
 
-        return circle_mask.to(img.device if isinstance(img, torch.Tensor) else "cpu")
+        return circle_mask.to(
+            img.device if isinstance(img, torch.Tensor) else "cpu"
+        )
 
     @torch.no_grad()
     def fetch_data(self, view_camera):
