@@ -821,7 +821,7 @@ class GaussianSplattingGUI:
             blurred,
             cv2.HOUGH_GRADIENT,
             dp=1,
-            minDist=50,
+            minDist=10,
             param1=50,
             param2=30,
             minRadius=5,
