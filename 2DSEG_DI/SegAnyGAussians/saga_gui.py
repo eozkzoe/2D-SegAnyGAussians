@@ -1,4 +1,5 @@
 # Borrowed from OmniSeg3D-GS (https://github.com/OceanYing/OmniSeg3D-GS)
+import time
 import torch
 import json
 from scene import Scene
@@ -1004,6 +1005,8 @@ class GaussianSplattingGUI:
                 final_mask = feature_mask & point_hole_mask
                 results = self.hole_model(img.cpu().numpy() * 255)
                 hole_centers = []
+                segmented_hole_centers = []
+                
                 for result in results:
                     boxes = result.boxes
                     for box in boxes:
@@ -1011,19 +1014,33 @@ class GaussianSplattingGUI:
                         center_x = (x1 + x2) / 2
                         center_y = (y1 + y2) / 2
                         hole_centers.append((center_x, center_y))
-                print(f"Detected {len(hole_centers)} holes at positions: {hole_centers}")
-                if len(hole_centers) > 0:
+                        
+                        # Check if this hole is part of the segmentation
+                        cx, cy = int(center_x), int(center_y)
+                        if cx < hole_mask.shape[1] and cy < hole_mask.shape[0] and hole_mask[cy, cx]:
+                            segmented_hole_centers.append((center_x, center_y))
+                
+                print(f"Detected {len(hole_centers)} holes, {len(segmented_hole_centers)} were segmented")
+                
+                if len(segmented_hole_centers) > 0:
                     os.makedirs("./hole_detections", exist_ok=True)
                     img_with_dots = img.cpu().numpy().copy() * 255
                     img_with_dots = img_with_dots.astype(np.uint8)
+                    
+                    # Draw all detected holes in blue (lighter)
                     for center in hole_centers:
                         cx, cy = int(center[0]), int(center[1])
-                        # Draw red circle at each hole center
-                        cv2.circle(img_with_dots, (cx, cy), 5, (255, 0, 0), -1)  # Red dot
+                        cv2.circle(img_with_dots, (cx, cy), 5, (0, 0, 255), 1)  # Blue circle outline
+                    
+                    # Draw segmented holes in red (stronger)
+                    for center in segmented_hole_centers:
+                        cx, cy = int(center[0]), int(center[1])
+                        cv2.circle(img_with_dots, (cx, cy), 5, (255, 0, 0), -1)  # Red filled circle
                     
                     timestamp = time.strftime("%Y%m%d-%H%M%S")
                     cv2.imwrite(f"./hole_detections/holes_{timestamp}.png", cv2.cvtColor(img_with_dots, cv2.COLOR_RGB2BGR))
-                    print(f"Saved image with hole centers to: ./hole_detections/holes_{timestamp}.png")
+                    print(f"Saved image with {len(segmented_hole_centers)} segmented holes to: ./hole_detections/holes_{timestamp}.png")
+                
                 self.engine["scene"].segment(final_mask)
                 self.engine["feature"].segment(final_mask)
 
