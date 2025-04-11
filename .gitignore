@@ -176,3 +176,5 @@ cython_debug/
 # outputs
 2DSEG_DI/2D-gaussian/output/
 2DSEG_DI/SegAnyGAussians/hole_detection_results/
+
+.DS_Store
