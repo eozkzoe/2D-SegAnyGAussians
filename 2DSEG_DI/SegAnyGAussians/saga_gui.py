@@ -987,16 +987,23 @@ class GaussianSplattingGUI:
             if self.select_holes_flag:
                 self.select_holes_flag = False
                 print("Segmenting holes...")
-                holes_mask = self.detect_holes(img)
+                # Apply hole detection filter
+                feat_pts = self.engine["feature"].get_point_features.squeeze()
+                scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
+                scale_gated_feat_pts = torch.nn.functional.normalize(
+                    scale_gated_feat_pts, dim=-1, p=2
+                )
 
-                holes_point_mask = holes_mask[..., 2].reshape(-1)
-                holes_point_mask = holes_point_mask[
-                    : self.engine["scene"].get_xyz.shape[0]
-                ]
-
-                self.score_pts_binary = holes_point_mask > 0
-                self.engine["scene"].segment(self.score_pts_binary)
-                self.engine["feature"].segment(self.score_pts_binary)
+                score_pts = scale_gated_feat_pts @ self.chosen_feature
+                score_pts = (score_pts + 1.0) / 2
+                feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
+                hole_viz = self.detect_holes(img)
+                hole_mask = hole_viz[..., 2] > 0
+                point_hole_mask = hole_mask.reshape(-1)
+                point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
+                final_mask = feature_mask & point_hole_mask
+                self.engine["scene"].segment(final_mask)
+                self.engine["feature"].segment(final_mask)
 
             if self.segment3d_flag:
                 self.segment3d_flag = False
@@ -1051,7 +1058,7 @@ class GaussianSplattingGUI:
                 if self.render_mode_holes:
                     # Apply hole detection filter
                     hole_viz = self.detect_holes(img)
-                    hole_mask = hole_viz[..., 1] > 0
+                    hole_mask = hole_viz[..., 2] > 0
                     point_hole_mask = hole_mask.reshape(-1)
                     point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
                     final_mask = final_mask & point_hole_mask
@@ -1148,7 +1155,7 @@ class GaussianSplattingGUI:
 
         if self.render_mode_holes:
             hole_viz = self.detect_holes(img)
-            hole_viz = hole_viz * 0.5  # Make it translucent
+            hole_viz = hole_viz * 0.75  # Make it translucent
             self.render_buffer = (
                 hole_viz.cpu().numpy().reshape(-1)
                 if self.render_buffer is None
