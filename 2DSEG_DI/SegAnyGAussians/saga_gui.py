@@ -269,7 +269,6 @@ class GaussianSplattingGUI:
         self.preview = False  # binary segmentation mode
         self.segment3d_flag = False
         self.select_holes_flag = False
-        self.circle_select_flag = False
         self.reload_flag = False  # reload the whole scene / point cloud
         self.object_seg_id = (
             0  # to store the segmented object with increasing index order (path at: ./)
@@ -815,18 +814,18 @@ class GaussianSplattingGUI:
         blurred = cv2.GaussianBlur(img_gray, (9, 9), 2)
 
         # Apply Canny edge detection
-        edges = cv2.Canny(blurred, 50, 150)
+        # edges = cv2.Canny(blurred, 50, 150)
 
         # Detect circles using Hough Circle Transform on edge image
         circles = cv2.HoughCircles(
-            edges,
+            blurred,
             cv2.HOUGH_GRADIENT,
             dp=1,
             minDist=50,
             param1=50,
             param2=30,
-            minRadius=20,
-            maxRadius=100,
+            minRadius=5,
+            maxRadius=20,
         )
 
         # Create circle mask
@@ -845,9 +844,7 @@ class GaussianSplattingGUI:
                 dist_from_center = torch.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
                 circle_mask |= dist_from_center <= radius
 
-        return circle_mask.to(
-            img.device if isinstance(img, torch.Tensor) else "cpu"
-        )
+        return circle_mask.to(img.device if isinstance(img, torch.Tensor) else "cpu")
 
     @torch.no_grad()
     def fetch_data(self, view_camera):
@@ -987,17 +984,16 @@ class GaussianSplattingGUI:
                 depth2img(depth_score.cpu().numpy()).astype(np.float32) / 255.0
             )
 
-            if self.circle_select_flag:
-                self.circle_select_flag = False
-                circle_mask = self.apply_circle_filter(img)
+            if self.select_holes_flag:
+                self.select_holes_flag = False
+                holes_mask = self.detect_holes(img)
 
-                # Convert 2D mask to point mask
-                point_circle_mask = circle_mask.reshape(-1)
-                point_circle_mask = point_circle_mask[
+                holes_point_mask = holes_mask[..., 2].reshape(-1)
+                holes_point_mask = holes_point_mask[
                     : self.engine["scene"].get_xyz.shape[0]
                 ]
 
-                self.score_pts_binary = point_circle_mask
+                self.score_pts_binary = holes_point_mask > 0
                 self.engine["scene"].segment(self.score_pts_binary)
                 self.engine["feature"].segment(self.score_pts_binary)
 
@@ -1013,15 +1009,14 @@ class GaussianSplattingGUI:
                 score_pts = (score_pts + 1.0) / 2
                 feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
 
+                rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
+                normal_mask = torch.zeros_like(
+                    rendered_normals[..., 0],
+                    dtype=torch.bool,
+                    device=rendered_normals.device,
+                )
                 if self.render_mode_normal:
                     # Apply GMM-based normal filtering
-                    rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
-                    normal_mask = torch.zeros_like(
-                        rendered_normals[..., 0],
-                        dtype=torch.bool,
-                        device=rendered_normals.device,
-                    )
-
                     for clicked_normal in self.chosen_normals:
                         valid_mask = torch.norm(rendered_normals, dim=-1) > 0.1
                         dominant_normal, gmm_mask = self.compute_dominant_normal_gmm(
@@ -1060,7 +1055,7 @@ class GaussianSplattingGUI:
 
                 point_normal_mask = normal_mask.reshape(-1)
                 point_normal_mask = point_normal_mask[: feature_mask.shape[0]]
-                final_mask = feature_mask & point_normal_mask
+                final_mask = final_mask & point_normal_mask
                 self.score_pts_binary = final_mask
 
                 self.engine["scene"].segment(self.score_pts_binary)
