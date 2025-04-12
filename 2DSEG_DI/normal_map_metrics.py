@@ -110,27 +110,42 @@ def compare_normal_maps(normal_map1_path, normal_map2_path):
     return metrics
 
 
-def load_labelme_mask(json_path):
+def load_labelme_mask(json_path, normal_map_shape=None):
     """Load a LabelMe annotation JSON file and create a binary mask.
-    Expects points in relative coordinates (0-1) and converts them to absolute pixel positions.
+
+    Args:
+        json_path: Path to the LabelMe annotation JSON file
+        normal_map_shape: Shape of the normal map to match (height, width)
+
+    Returns:
+        Binary mask array
     """
     with open(json_path, "r") as f:
         data = json.load(f)
 
     # Get image dimensions from the JSON
-    height = data["imageHeight"]
-    width = data["imageWidth"]
+    json_height = data["imageHeight"]
+    json_width = data["imageWidth"]
 
-    # Create empty mask
-    mask = np.zeros((height, width), dtype=np.uint8)
+    # Use normal map dimensions if provided, otherwise use JSON dimensions
+    target_height = normal_map_shape[0] if normal_map_shape else json_height
+    target_width = normal_map_shape[1] if normal_map_shape else json_width
+
+    # Create empty mask with target dimensions
+    mask = np.zeros((target_height, target_width), dtype=np.uint8)
 
     # Fill mask with annotation
     for shape in data["shapes"]:
-        # Convert relative coordinates to absolute pixel positions
-        points = np.array(shape["points"])
-        points[:, 0] = points[:, 0] * width  # Scale x coordinates
-        points[:, 1] = points[:, 1] * height  # Scale y coordinates
+        # Convert pixel coordinates to relative coordinates (0-1)
+        points = np.array(shape["points"], dtype=np.float32)
+        points[:, 0] = points[:, 0] / json_width  # normalize x coordinates
+        points[:, 1] = points[:, 1] / json_height  # normalize y coordinates
+
+        # Convert relative coordinates to target pixel coordinates
+        points[:, 0] = points[:, 0] * target_width
+        points[:, 1] = points[:, 1] * target_height
         points = points.astype(np.int32)
+
         cv2.fillPoly(mask, [points], 1)
 
     return mask
