@@ -112,11 +112,11 @@ def compare_normal_maps(normal_map1_path, normal_map2_path):
 
 def load_labelme_mask(json_path, normal_map_shape=None):
     """Load a LabelMe annotation JSON file and create a binary mask.
-
+    
     Args:
         json_path: Path to the LabelMe annotation JSON file
         normal_map_shape: Shape of the normal map to match (height, width)
-
+    
     Returns:
         Binary mask array
     """
@@ -126,7 +126,7 @@ def load_labelme_mask(json_path, normal_map_shape=None):
     # Get image dimensions from the JSON
     json_height = data["imageHeight"]
     json_width = data["imageWidth"]
-
+    
     # Use normal map dimensions if provided, otherwise use JSON dimensions
     target_height = normal_map_shape[0] if normal_map_shape else json_height
     target_width = normal_map_shape[1] if normal_map_shape else json_width
@@ -205,14 +205,10 @@ def analyze_flat_surface(normal_map_path, mask_json_path):
     """
     # Load normal map and mask
     normal_map = load_normal_map(normal_map_path)
-    mask = load_labelme_mask(mask_json_path)
+    mask = load_labelme_mask(mask_json_path, normal_map.shape[:2])
 
-    # Ensure compatible shapes
-    if normal_map.shape[:2] != mask.shape:
-        raise ValueError(
-            f"Normal map and mask have incompatible shapes: {normal_map.shape[:2]} vs {mask.shape}"
-        )
-
+    # No need to check compatibility since we're creating the mask with the right dimensions
+    
     # Compute consistency metrics
     metrics = compute_normal_consistency(normal_map, mask)
 
