@@ -111,7 +111,9 @@ def compare_normal_maps(normal_map1_path, normal_map2_path):
 
 
 def load_labelme_mask(json_path):
-    """Load a LabelMe annotation JSON file and create a binary mask."""
+    """Load a LabelMe annotation JSON file and create a binary mask.
+    Expects points in relative coordinates (0-1) and converts them to absolute pixel positions.
+    """
     with open(json_path, "r") as f:
         data = json.load(f)
 
@@ -124,7 +126,11 @@ def load_labelme_mask(json_path):
 
     # Fill mask with annotation
     for shape in data["shapes"]:
-        points = np.array(shape["points"], dtype=np.int32)
+        # Convert relative coordinates to absolute pixel positions
+        points = np.array(shape["points"])
+        points[:, 0] = points[:, 0] * width  # Scale x coordinates
+        points[:, 1] = points[:, 1] * height  # Scale y coordinates
+        points = points.astype(np.int32)
         cv2.fillPoly(mask, [points], 1)
 
     return mask
