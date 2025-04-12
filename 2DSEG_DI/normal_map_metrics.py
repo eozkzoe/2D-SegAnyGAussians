@@ -196,3 +196,41 @@ def analyze_flat_surface(normal_map_path, mask_json_path):
     metrics = compute_normal_consistency(normal_map, mask)
 
     return metrics
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Compare two normal maps and analyze surface flatness"
+    )
+    parser.add_argument(
+        "--normal1", type=str, required=True, help="Path to first normal map"
+    )
+    parser.add_argument(
+        "--normal2", type=str, required=True, help="Path to second normal map"
+    )
+    parser.add_argument(
+        "--mask", type=str, help="Path to LabelMe mask JSON file for flatness analysis"
+    )
+    args = parser.parse_args()
+
+    # Compare the two normal maps
+    print("\nComparing normal maps...")
+    metrics = compare_normal_maps(args.normal1, args.normal2)
+    print("Comparison Metrics:")
+    print(f"MSE: {metrics['mse']:.6f}")
+    print(f"Cosine Similarity: {metrics['cosine_similarity']:.6f}")
+    print(f"Angular Error (degrees): {metrics['angular_error']:.2f}")
+    print(f"PSNR: {metrics['psnr']:.2f}")
+
+    # If mask is provided, analyze surface flatness
+    if args.mask:
+        print("\nAnalyzing surface flatness...")
+        flatness_metrics = analyze_flat_surface(args.normal1, args.mask)
+        print("Flatness Metrics:")
+        print(f"Normal Vector Variance: {flatness_metrics['variance']:.6f}")
+        print(
+            f"Mean Angular Deviation: {flatness_metrics['mean_angular_deviation']:.2f} degrees"
+        )
+        print(f"Planarity Score: {flatness_metrics['planarity_score']:.6f}")
