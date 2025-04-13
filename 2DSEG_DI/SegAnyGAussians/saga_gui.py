@@ -847,76 +847,38 @@ class GaussianSplattingGUI:
 
         return circle_mask.to(img.device if isinstance(img, torch.Tensor) else "cpu")
 
-    def render_normal_indicator(self, center_x, center_y, normal, hole_viz):
-        """Render a small Gaussian to indicate normal direction at hole center"""
-        radius = 2  # Small radius for the normal indicator
-        length = 10  # Length of normal vector visualization
+    def render_3d_normal_indicator(self, center_x, center_y, normal, img, normal_map):
+        """Render a 3D normal indicator by creating a small line in world space"""
+        # Get depth at this point
+        depth = torch.norm(normal_map[center_y, center_x], dim=-1)
+        if depth < 0.1:  # Skip if depth is too small
+            return
 
-        # Base point (red)
-        y_indices, x_indices = torch.meshgrid(
-            torch.arange(
-                max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)
-            ),
-            torch.arange(
-                max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1)
-            ),
+        # Create points along the normal direction
+        length = 0.1  # Length of normal visualization in world space
+        points = torch.linspace(0, length, steps=10)
+
+        # Project points to screen space
+        cam = self.construct_camera()
+        world_points = torch.tensor(
+            [
+                [
+                    center_x + normal[0] * p,
+                    center_y + normal[1] * p,
+                    depth + normal[2] * p,
+                ]
+                for p in points
+            ],
+            device=normal_map.device,
         )
-        dist_from_center = torch.sqrt(
-            (x_indices - center_x) ** 2 + (y_indices - center_y) ** 2
-        )
-        mask = dist_from_center <= radius
-        hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red base
-        hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0
 
-        # Normal direction (white line)
-        end_x = int(center_x + normal[0] * length)
-        end_y = int(center_y + normal[1] * length)
-        points = torch.linspace(0, 1, steps=length)
-        line_x = torch.round(center_x + normal[0] * length * points).long()
-        line_y = torch.round(center_y + normal[1] * length * points).long()
-
-        # Only draw points within image bounds
-        valid_points = (
-            (line_x >= 0)
-            & (line_x < hole_viz.shape[1])
-            & (line_y >= 0)
-            & (line_y < hole_viz.shape[0])
-        )
-        line_x = line_x[valid_points]
-        line_y = line_y[valid_points]
-
-        hole_viz[line_y, line_x] = 1.0  # White line for normal
-
-    def render_hole_indicator(self, center_x, center_y, hole_viz):
-        """Render a small red circle at hole center"""
-        radius = 2  # Small radius for the hole indicator
-        y_indices, x_indices = torch.meshgrid(
-            torch.arange(
-                max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)
-            ),
-            torch.arange(
-                max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1)
-            ),
-        )
-        dist_from_center = torch.sqrt(
-            (x_indices - center_x) ** 2 + (y_indices - center_y) ** 2
-        )
-        mask = dist_from_center <= radius
-        hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red base
-        hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0
-
-    def add_normal_gaussian(self, center_point, normal, scale=0.02):
-        """Add a small Gaussian to visualize normal direction in 3D"""
-        # Create a small Gaussian at the center point
-        xyz = torch.tensor(center_point, device="cuda").float()
-        direction = torch.tensor(normal, device="cuda").float()
-
-        # Add the Gaussian to the scene
-        self.engine["scene"].add_visualization_gaussian(
-            xyz,
-            direction * scale,  # Scale the normal vector
-            torch.tensor([1.0, 0.0, 0.0], device="cuda"),  # Red color
-        )
+        # Draw the points
+        for point in world_points:
+            x, y = int(point[0]), int(point[1])
+            if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
+                img[y - 1 : y + 2, x - 1 : x + 2] = torch.tensor(
+                    [1.0, 0.0, 0.0]
+                )  # Red dot
 
     @torch.no_grad()
     def fetch_data(self, view_camera):
@@ -1325,8 +1287,8 @@ class GaussianSplattingGUI:
             hole_viz = self.detect_holes(img)
             results = self.hole_model(img.cpu().numpy() * 255)
 
-            # Clear previous normal visualizations
-            self.engine["scene"].clear_visualization_gaussians()
+            # Create a copy of the image for normal visualization
+            normal_viz = img.clone()
 
             for result in results:
                 boxes = result.boxes
@@ -1338,25 +1300,26 @@ class GaussianSplattingGUI:
                     # Always render the red circle in 2D
                     self.render_hole_indicator(center_x, center_y, hole_viz)
 
-                    # If we have normals, add them as 3D Gaussians
+                    # If we have normals, visualize them in 3D space
                     if hasattr(self, "hole_normals"):
                         for stored_x, stored_y, normal in self.hole_normals:
                             if (
                                 abs(stored_x - center_x) < 5
                                 and abs(stored_y - center_y) < 5
                             ):
-                                # Get 3D position from depth
-                                world_pos = self.engine["scene"].get_world_position(
-                                    center_x, center_y
+                                self.render_3d_normal_indicator(
+                                    center_x, center_y, normal, normal_viz, normal_map
                                 )
-                                if world_pos is not None:
-                                    self.add_normal_gaussian(world_pos, normal)
 
+            # Combine visualizations
             hole_viz = hole_viz * 0.75
+            normal_viz = normal_viz * 0.25  # Make normal indicators more subtle
+            combined_viz = hole_viz + normal_viz
+
             self.render_buffer = (
-                hole_viz.cpu().numpy().reshape(-1)
+                combined_viz.cpu().numpy().reshape(-1)
                 if self.render_buffer is None
-                else self.render_buffer + hole_viz.cpu().numpy().reshape(-1)
+                else self.render_buffer + combined_viz.cpu().numpy().reshape(-1)
             )
             render_num += 1
 
