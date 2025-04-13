@@ -871,17 +871,17 @@ class GaussianSplattingGUI:
         cam = self.construct_camera()
         xyz = self.engine["scene"].get_xyz
 
-        # Manual projection using camera parameters
-        R = cam.R
-        T = cam.T
-        
+        # Move camera parameters to GPU
+        R = cam.R.to(xyz.device)
+        T = cam.T.to(xyz.device)
+
         # Transform points to camera space
-        cam_points = (xyz @ R.T + T.unsqueeze(0)).to(xyz.device)
-        
+        cam_points = xyz @ R.T + T.unsqueeze(0)
+
         # Perspective projection
         fx = self.width / (2 * np.tan(cam.FoVx / 2))
         fy = self.height / (2 * np.tan(cam.FoVy / 2))
-        
+
         # Project to image space
         proj_x = (cam_points[:, 0] / -cam_points[:, 2]) * fx + self.width / 2
         proj_y = (cam_points[:, 1] / -cam_points[:, 2]) * fy + self.height / 2
@@ -897,29 +897,32 @@ class GaussianSplattingGUI:
         length = 0.05  # Length of normal visualization
         steps = 20
         points = torch.linspace(0, length, steps=steps, device=world_pos.device)
-        world_points = world_pos.unsqueeze(0) + torch.from_numpy(normal).to(
-            world_pos.device
-        ).unsqueeze(0) * points.unsqueeze(1)
+        normal_tensor = torch.from_numpy(normal).to(world_pos.device).float()
+        world_points = world_pos.unsqueeze(0) + normal_tensor.unsqueeze(
+            0
+        ) * points.unsqueeze(1)
 
         # Project points to screen space
-        cam_points = (world_points @ R.T + T.unsqueeze(0)).to(world_points.device)
+        cam_points = world_points @ R.T + T.unsqueeze(0)
         screen_x = (cam_points[:, 0] / -cam_points[:, 2]) * fx + self.width / 2
         screen_y = (cam_points[:, 1] / -cam_points[:, 2]) * fy + self.height / 2
         screen_points = torch.stack([screen_x, screen_y], dim=1)
 
         # Draw the points with depth-based size and color
-        depths = torch.norm(world_points - cam.T.to(world_points.device), dim=1)
+        depths = torch.norm(world_points - T, dim=1)
         max_depth = depths[0]  # Starting depth
 
         for i in range(len(screen_points)):
-            x, y = int(screen_points[i, 0]), int(screen_points[i, 1])
+            x, y = int(screen_points[i].cpu().item()), int(
+                screen_points[i].cpu().item()
+            )
             if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
                 # Size and color based on depth
-                depth_ratio = depths[i] / max_depth
+                depth_ratio = (depths[i] / max_depth).cpu().item()
                 size = max(1, int(3 * (1.0 - i / steps)))
                 color = torch.tensor([1.0, 0.0, 0.0], device=img.device) * (
                     1.0 - depth_ratio
-                )  # Fade with depth
+                )
 
                 # Draw point
                 y_range = slice(max(0, y - size), min(img.shape[0], y + size + 1))
