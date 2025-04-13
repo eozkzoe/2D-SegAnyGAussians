@@ -784,7 +784,7 @@ class GaussianSplattingGUI:
         # Convert torch tensor to numpy array and ensure correct format
         img_np = (img.cpu().numpy() * 255).astype(np.uint8)
 
-        results = self.hole_model(img_np)
+        results = self.hole_model(img_np, verbose=False)
 
         hole_viz = torch.zeros_like(img)
 
@@ -1311,7 +1311,7 @@ class GaussianSplattingGUI:
 
         if self.render_mode_holes:
             hole_viz = self.detect_holes(img)
-            results = self.hole_model(img.cpu().numpy() * 255)
+            results = self.hole_model(img.cpu().numpy() * 255, verbose=False)
 
             # Create a copy of the image for normal visualization
             normal_viz = img.clone()
@@ -1349,7 +1349,7 @@ class GaussianSplattingGUI:
             )
             render_num += 1
 
-        self.render_buffer / render_num
+        self.render_buffer /= render_num
 
         dpg.set_value("_texture", self.render_buffer)
 
