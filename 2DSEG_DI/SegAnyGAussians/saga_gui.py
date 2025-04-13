@@ -871,9 +871,24 @@ class GaussianSplattingGUI:
         cam = self.construct_camera()
         xyz = self.engine["scene"].get_xyz
 
+        # Manual projection using camera parameters
+        R = cam.R
+        T = cam.T
+        
+        # Transform points to camera space
+        cam_points = (xyz @ R.T + T.unsqueeze(0)).to(xyz.device)
+        
+        # Perspective projection
+        fx = self.width / (2 * np.tan(cam.FoVx / 2))
+        fy = self.height / (2 * np.tan(cam.FoVy / 2))
+        
+        # Project to image space
+        proj_x = (cam_points[:, 0] / -cam_points[:, 2]) * fx + self.width / 2
+        proj_y = (cam_points[:, 1] / -cam_points[:, 2]) * fy + self.height / 2
+        proj = torch.stack([proj_x, proj_y], dim=1)
+
         # Find closest point to clicked position in screen space
         screen_pos = torch.tensor([[center_x, center_y]], device=xyz.device)
-        proj = cam.project(xyz)  # [N, 2]
         distances = torch.norm(proj - screen_pos, dim=1)
         closest_idx = torch.argmin(distances)
         world_pos = xyz[closest_idx]
@@ -886,8 +901,11 @@ class GaussianSplattingGUI:
             world_pos.device
         ).unsqueeze(0) * points.unsqueeze(1)
 
-        # Project points to screen space using camera
-        screen_points = cam.project(world_points)  # [steps, 2]
+        # Project points to screen space
+        cam_points = (world_points @ R.T + T.unsqueeze(0)).to(world_points.device)
+        screen_x = (cam_points[:, 0] / -cam_points[:, 2]) * fx + self.width / 2
+        screen_y = (cam_points[:, 1] / -cam_points[:, 2]) * fy + self.height / 2
+        screen_points = torch.stack([screen_x, screen_y], dim=1)
 
         # Draw the points with depth-based size and color
         depths = torch.norm(world_points - cam.T.to(world_points.device), dim=1)
@@ -899,7 +917,7 @@ class GaussianSplattingGUI:
                 # Size and color based on depth
                 depth_ratio = depths[i] / max_depth
                 size = max(1, int(3 * (1.0 - i / steps)))
-                color = torch.tensor([1.0, 0.0, 0.0]) * (
+                color = torch.tensor([1.0, 0.0, 0.0], device=img.device) * (
                     1.0 - depth_ratio
                 )  # Fade with depth
 
