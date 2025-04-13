@@ -847,6 +847,18 @@ class GaussianSplattingGUI:
 
         return circle_mask.to(img.device if isinstance(img, torch.Tensor) else "cpu")
 
+    def render_hole_indicator(self, center_x, center_y, hole_viz):
+        """Render a small red circle at hole center"""
+        radius = 2  # Small radius for the hole indicator
+        y_indices, x_indices = torch.meshgrid(
+            torch.arange(max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)),
+            torch.arange(max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1))
+        )
+        dist_from_center = torch.sqrt((x_indices - center_x)**2 + (y_indices - center_y)**2)
+        mask = dist_from_center <= radius
+        hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red base
+        hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0
+
     def render_3d_normal_indicator(self, center_x, center_y, normal, img, normal_map):
         """Render a 3D normal indicator by creating a small line in world space"""
         # Get depth at this point
