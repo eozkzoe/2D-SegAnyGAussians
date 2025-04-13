@@ -887,6 +887,37 @@ class GaussianSplattingGUI:
 
         hole_viz[line_y, line_x] = 1.0  # White line for normal
 
+    def render_hole_indicator(self, center_x, center_y, hole_viz):
+        """Render a small red circle at hole center"""
+        radius = 2  # Small radius for the hole indicator
+        y_indices, x_indices = torch.meshgrid(
+            torch.arange(
+                max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)
+            ),
+            torch.arange(
+                max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1)
+            ),
+        )
+        dist_from_center = torch.sqrt(
+            (x_indices - center_x) ** 2 + (y_indices - center_y) ** 2
+        )
+        mask = dist_from_center <= radius
+        hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red base
+        hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0
+
+    def add_normal_gaussian(self, center_point, normal, scale=0.02):
+        """Add a small Gaussian to visualize normal direction in 3D"""
+        # Create a small Gaussian at the center point
+        xyz = torch.tensor(center_point, device="cuda").float()
+        direction = torch.tensor(normal, device="cuda").float()
+
+        # Add the Gaussian to the scene
+        self.engine["scene"].add_visualization_gaussian(
+            xyz,
+            direction * scale,  # Scale the normal vector
+            torch.tensor([1.0, 0.0, 0.0], device="cuda"),  # Red color
+        )
+
     @torch.no_grad()
     def fetch_data(self, view_camera):
         score_map = None
@@ -1292,37 +1323,36 @@ class GaussianSplattingGUI:
 
         if self.render_mode_holes:
             hole_viz = self.detect_holes(img)
-
-            # Draw hole centers from YOLO detection
             results = self.hole_model(img.cpu().numpy() * 255)
+
+            # Clear previous normal visualizations
+            self.engine["scene"].clear_visualization_gaussians()
+
             for result in results:
                 boxes = result.boxes
                 for box in boxes:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    center_x, center_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
+                    center_x = int((x1 + x2) / 2)
+                    center_y = int((y1 + y2) / 2)
 
-                    # Draw a small red dot at the center
-                    radius = 3
-                    y_indices, x_indices = torch.meshgrid(
-                        torch.arange(
-                            max(0, center_y - radius),
-                            min(hole_viz.shape[0], center_y + radius + 1),
-                        ),
-                        torch.arange(
-                            max(0, center_x - radius),
-                            min(hole_viz.shape[1], center_x + radius + 1),
-                        ),
-                    )
-                    dist_from_center = torch.sqrt(
-                        (x_indices - center_x) ** 2 + (y_indices - center_y) ** 2
-                    )
-                    mask = dist_from_center <= radius
-                    hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red channel
-                    hole_viz[y_indices[mask], x_indices[mask], 1:] = (
-                        0.0  # Zero other channels
-                    )
+                    # Always render the red circle in 2D
+                    self.render_hole_indicator(center_x, center_y, hole_viz)
 
-            hole_viz = hole_viz * 0.75  # Make it translucent
+                    # If we have normals, add them as 3D Gaussians
+                    if hasattr(self, "hole_normals"):
+                        for stored_x, stored_y, normal in self.hole_normals:
+                            if (
+                                abs(stored_x - center_x) < 5
+                                and abs(stored_y - center_y) < 5
+                            ):
+                                # Get 3D position from depth
+                                world_pos = self.engine["scene"].get_world_position(
+                                    center_x, center_y
+                                )
+                                if world_pos is not None:
+                                    self.add_normal_gaussian(world_pos, normal)
+
+            hole_viz = hole_viz * 0.75
             self.render_buffer = (
                 hole_viz.cpu().numpy().reshape(-1)
                 if self.render_buffer is None
