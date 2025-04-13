@@ -13,11 +13,21 @@ def visualize_holes(json_path, vector_length=0.1):
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111, projection="3d")
 
+    # Rotation matrix for 90 degrees around x-axis
+    rot_matrix = np.array([
+        [1, 0, 0],
+        [0, 0, -1],
+        [0, 1, 0]
+    ])
+
     # Plot each hole center and normal
     for hole in data["holes"]:
         # Get center and normal
         center = np.array(hole["center"])
         normal = np.array(hole["normal"])
+
+        # Rotate normal vector
+        normal = rot_matrix @ normal
 
         # Normalize normal vector and scale to desired length
         normal = normal / np.linalg.norm(normal) * vector_length
