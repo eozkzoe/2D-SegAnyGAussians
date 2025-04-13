@@ -1223,16 +1223,52 @@ class GaussianSplattingGUI:
                     # Combine with existing mask
                     final_mask = final_mask & point_circle_mask
 
+                # Modified holes filtering
                 if self.render_mode_holes:
-                    # Apply hole detection filter
-                    hole_viz = self.detect_holes(img)
-                    hole_mask = hole_viz[..., 2] > 0
-                    point_hole_mask = hole_mask.reshape(-1)
-                    point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
-                    final_mask = final_mask & point_hole_mask
+                    # Get all point positions in screen space
+                    cam = self.construct_camera()
+                    xyz = self.engine["scene"].get_xyz
+
+                    # Project points to screen space
+                    R = torch.from_numpy(cam.R).float().to(xyz.device)
+                    T = torch.from_numpy(cam.T).float().to(xyz.device)
+                    cam_points = xyz @ R.T + T.unsqueeze(0)
+
+                    # Perspective projection
+                    fx = self.width / (2 * np.tan(cam.FoVx / 2))
+                    fy = self.height / (2 * np.tan(cam.FoVy / 2))
+                    proj_x = (
+                        cam_points[:, 0] / -cam_points[:, 2]
+                    ) * fx + self.width / 2
+                    proj_y = (
+                        cam_points[:, 1] / -cam_points[:, 2]
+                    ) * fy + self.height / 2
+
+                    # Get hole boxes
+                    results = self.hole_model(img.cpu().numpy() * 255, verbose=False)
+                    point_in_holes = torch.zeros(
+                        xyz.shape[0], dtype=torch.bool, device=xyz.device
+                    )
+
+                    for result in results:
+                        boxes = result.boxes
+                        for box in boxes:
+                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+
+                            # Check which points project into this box
+                            in_box = (
+                                (proj_x >= x1)
+                                & (proj_x <= x2)
+                                & (proj_y >= y1)
+                                & (proj_y <= y2)
+                            )
+                            point_in_holes |= in_box
+
+                    # Apply hole mask as final filter
+                    final_mask = final_mask & point_in_holes
 
                 self.score_pts_binary = final_mask
-
                 self.engine["scene"].segment(self.score_pts_binary)
                 self.engine["feature"].segment(self.score_pts_binary)
 
