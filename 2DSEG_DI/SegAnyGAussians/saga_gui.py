@@ -847,6 +847,46 @@ class GaussianSplattingGUI:
 
         return circle_mask.to(img.device if isinstance(img, torch.Tensor) else "cpu")
 
+    def render_normal_indicator(self, center_x, center_y, normal, hole_viz):
+        """Render a small Gaussian to indicate normal direction at hole center"""
+        radius = 2  # Small radius for the normal indicator
+        length = 10  # Length of normal vector visualization
+
+        # Base point (red)
+        y_indices, x_indices = torch.meshgrid(
+            torch.arange(
+                max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)
+            ),
+            torch.arange(
+                max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1)
+            ),
+        )
+        dist_from_center = torch.sqrt(
+            (x_indices - center_x) ** 2 + (y_indices - center_y) ** 2
+        )
+        mask = dist_from_center <= radius
+        hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red base
+        hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0
+
+        # Normal direction (white line)
+        end_x = int(center_x + normal[0] * length)
+        end_y = int(center_y + normal[1] * length)
+        points = torch.linspace(0, 1, steps=length)
+        line_x = torch.round(center_x + normal[0] * length * points).long()
+        line_y = torch.round(center_y + normal[1] * length * points).long()
+
+        # Only draw points within image bounds
+        valid_points = (
+            (line_x >= 0)
+            & (line_x < hole_viz.shape[1])
+            & (line_y >= 0)
+            & (line_y < hole_viz.shape[0])
+        )
+        line_x = line_x[valid_points]
+        line_y = line_y[valid_points]
+
+        hole_viz[line_y, line_x] = 1.0  # White line for normal
+
     @torch.no_grad()
     def fetch_data(self, view_camera):
         score_map = None
@@ -954,71 +994,41 @@ class GaussianSplattingGUI:
             featmap = scale_gated_feat.reshape(H, W, -1)
             combined_feature = None
 
+            hole_normals = []
             for result in results:
                 boxes = result.boxes
                 for box in boxes:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    center_x = (x1 + x2) / 2
-                    center_y = (y1 + y2) / 2
-                    hole_centers.append((center_x, center_y))
+                    center_x = int((x1 + x2) / 2)
+                    center_y = int((y1 + y2) / 2)
 
-                    # Extract feature at hole center
-                    cx, cy = int(center_x), int(center_y)
                     if (
                         cx < hole_mask.shape[1]
                         and cy < hole_mask.shape[0]
                         and hole_mask[cy, cx]
                     ):
-                        segmented_hole_centers.append((center_x, center_y))
+                        # Simulate click at hole center
                         hole_feat = featmap[cy, cx, :].reshape(featmap.shape[-1], -1)
+                        hole_normal = normal_map[cy, cx]
 
-                        # Combine features from all holes
-                        if combined_feature is None:
-                            combined_feature = hole_feat
-                        else:
-                            combined_feature = torch.cat(
-                                [combined_feature, hole_feat], dim=-1
-                            )
+                        # Segment using this feature
+                        score_pts = scale_gated_feat_pts @ hole_feat
+                        score_pts = (score_pts + 1.0) / 2
+                        current_mask = (
+                            score_pts > dpg.get_value("_ScoreThres")
+                        ).squeeze()
 
-            if combined_feature is not None:
-                # Compute similarity with combined features
-                score_pts = scale_gated_feat_pts @ combined_feature
-                score_pts = (score_pts + 1.0) / 2
-                feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
+                        # Apply hole mask
+                        point_hole_mask = hole_mask.reshape(-1)[: current_mask.shape[0]]
+                        final_mask = current_mask & point_hole_mask
 
-                # Apply hole mask
-                point_hole_mask = hole_mask.reshape(-1)
-                point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
-                final_mask = feature_mask & point_hole_mask
+                        # Compute normal for this segment
+                        if torch.sum(final_mask) > 0:
+                            normal = self.compute_normals_from_neighbors(final_mask)
+                            hole_normals.append((center_x, center_y, normal))
 
-                # Visualization code
-                if len(segmented_hole_centers) > 0:
-                    os.makedirs("./hole_detections", exist_ok=True)
-                    img_with_dots = img.cpu().numpy().copy() * 255
-                    img_with_dots = img_with_dots.astype(np.uint8)
-
-                    for center in hole_centers:
-                        cx, cy = int(center[0]), int(center[1])
-                        cv2.circle(img_with_dots, (cx, cy), 5, (0, 0, 255), 1)
-
-                    for center in segmented_hole_centers:
-                        cx, cy = int(center[0]), int(center[1])
-                        cv2.circle(img_with_dots, (cx, cy), 5, (255, 0, 0), -1)
-
-                    timestamp = time.strftime("%Y%m%d-%H%M%S")
-                    cv2.imwrite(
-                        f"./hole_detections/holes_{timestamp}.png",
-                        cv2.cvtColor(img_with_dots, cv2.COLOR_RGB2BGR),
-                    )
-                    print(
-                        f"Saved image with {len(segmented_hole_centers)} segmented holes to: ./hole_detections/holes_{timestamp}.png"
-                    )
-
-                self.engine["scene"].segment(final_mask)
-                self.engine["feature"].segment(final_mask)
-                print(f"Segmented {torch.sum(final_mask).item()} points")
-            else:
-                print("No holes detected in current view")
+            # Store normals for visualization
+            self.hole_normals = hole_normals
 
         if len(self.new_click_xy) > 0:
             featmap = scale_gated_feat.reshape(H, W, -1)
@@ -1280,27 +1290,13 @@ class GaussianSplattingGUI:
 
         if self.render_mode_holes:
             hole_viz = self.detect_holes(img)
-            
-            # Draw hole centers from YOLO detection
-            results = self.hole_model(img.cpu().numpy() * 255)
-            for result in results:
-                boxes = result.boxes
-                for box in boxes:
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    center_x, center_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
-                    
-                    # Draw a small red dot at the center
-                    radius = 3
-                    y_indices, x_indices = torch.meshgrid(
-                        torch.arange(max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)),
-                        torch.arange(max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1))
-                    )
-                    dist_from_center = torch.sqrt((x_indices - center_x)**2 + (y_indices - center_y)**2)
-                    mask = dist_from_center <= radius
-                    hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red channel
-                    hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0  # Zero other channels
-            
-            hole_viz = hole_viz * 0.75  # Make it translucent
+
+            # Draw hole centers and normals
+            if hasattr(self, "hole_normals") and self.hole_normals:
+                for center_x, center_y, normal in self.hole_normals:
+                    self.render_normal_indicator(center_x, center_y, normal, hole_viz)
+
+            hole_viz = hole_viz * 0.75
             self.render_buffer = (
                 hole_viz.cpu().numpy().reshape(-1)
                 if self.render_buffer is None
