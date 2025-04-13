@@ -992,25 +992,20 @@ class GaussianSplattingGUI:
 
         if self.select_holes_flag:
             self.select_holes_flag = False
-            print("Segmenting holes...")
-            # Apply hole detection filter
-            feat_pts = self.engine["feature"].get_point_features.squeeze()
-            scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
-            scale_gated_feat_pts = torch.nn.functional.normalize(
-                scale_gated_feat_pts, dim=-1, p=2
-            )
+            print("Selecting holes...")
 
+            # Detect holes
+            results = self.hole_model(img.cpu().numpy() * 255, verbose=False)
             hole_viz = self.detect_holes(img)
-            hole_mask = hole_viz[..., 2] > 0
-            results = self.hole_model(img.cpu().numpy() * 255)
 
-            # Initialize combined feature mask
-            feature_mask = torch.zeros(
-                feat_pts.shape[0], dtype=torch.bool, device=feat_pts.device
-            )
-            hole_normals = []
+            # Reset click history if not in multi-click mode
+            if not self.clickmode_multi_button:
+                self.new_click_xy = []
+                self.prompt_num = 0
+                self.chosen_feature = None
+                self.chosen_normals = None
 
-            # Process each hole
+            # Process each detection as a click
             featmap = scale_gated_feat.reshape(H, W, -1)
             for result in results:
                 boxes = result.boxes
@@ -1019,37 +1014,32 @@ class GaussianSplattingGUI:
                     center_x = int((x1 + x2) / 2)
                     center_y = int((y1 + y2) / 2)
 
-                    if (
-                        center_x < hole_mask.shape[1]
-                        and center_y < hole_mask.shape[0]
-                        and hole_mask[center_y, center_x]
-                    ):
-                        # Get feature and compute similarity
-                        hole_feat = featmap[center_y, center_x, :].reshape(
-                            featmap.shape[-1], -1
+                    # Get feature and normal at hole center
+                    new_feat = featmap[center_y % H, center_x % W, :].reshape(
+                        featmap.shape[-1], -1
+                    )
+                    new_normal = normal_map[center_y % H, center_x % W]
+
+                    # Update chosen features and normals
+                    if (self.prompt_num == 0) or (not self.clickmode_multi_button):
+                        self.chosen_feature = new_feat
+                        self.chosen_normals = new_normal.unsqueeze(0)
+                    else:
+                        self.chosen_feature = torch.cat(
+                            [self.chosen_feature, new_feat], dim=-1
                         )
-                        score_pts = scale_gated_feat_pts @ hole_feat
-                        score_pts = (score_pts + 1.0) / 2
-                        current_mask = (
-                            score_pts > dpg.get_value("_ScoreThres")
-                        ).squeeze()
+                        self.chosen_normals = torch.cat(
+                            [self.chosen_normals, new_normal.unsqueeze(0)], dim=0
+                        )
 
-                        # Apply hole mask to points
-                        point_hole_mask = hole_mask.reshape(-1)[: current_mask.shape[0]]
-                        final_mask = current_mask & point_hole_mask
+                    self.prompt_num += 1
 
-                        # Segment if we found points
-                        if torch.sum(final_mask) > 0:
-                            # Compute normal for visualization
-                            normal = self.compute_normals_from_neighbors(final_mask)
-                            hole_normals.append((center_x, center_y, normal))
-
-                            # Update scene segmentation
-                            self.engine["scene"].segment(final_mask)
-                            self.engine["feature"].segment(final_mask)
-
-            # Store normals for visualization
-            self.hole_normals = hole_normals
+                    # Store normal for visualization
+                    if not hasattr(self, "hole_normals"):
+                        self.hole_normals = []
+                    self.hole_normals.append(
+                        (center_x, center_y, new_normal.cpu().numpy())
+                    )
 
         if len(self.new_click_xy) > 0:
             featmap = scale_gated_feat.reshape(H, W, -1)
