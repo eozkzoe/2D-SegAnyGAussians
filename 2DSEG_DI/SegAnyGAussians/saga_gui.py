@@ -994,7 +994,8 @@ class GaussianSplattingGUI:
             featmap = scale_gated_feat.reshape(H, W, -1)
             combined_feature = None
 
-            hole_normals = []
+            hole_normals = []  # Store normals for visualization
+
             for result in results:
                 boxes = result.boxes
                 for box in boxes:
@@ -1003,13 +1004,15 @@ class GaussianSplattingGUI:
                     center_y = int((y1 + y2) / 2)
 
                     if (
-                        cx < hole_mask.shape[1]
-                        and cy < hole_mask.shape[0]
-                        and hole_mask[cy, cx]
+                        center_x < hole_mask.shape[1]
+                        and center_y < hole_mask.shape[0]
+                        and hole_mask[center_y, center_x]
                     ):
                         # Simulate click at hole center
-                        hole_feat = featmap[cy, cx, :].reshape(featmap.shape[-1], -1)
-                        hole_normal = normal_map[cy, cx]
+                        hole_feat = featmap[center_y, center_x, :].reshape(
+                            featmap.shape[-1], -1
+                        )
+                        hole_normal = normal_map[center_y, center_x]
 
                         # Segment using this feature
                         score_pts = scale_gated_feat_pts @ hole_feat
@@ -1017,7 +1020,6 @@ class GaussianSplattingGUI:
                         current_mask = (
                             score_pts > dpg.get_value("_ScoreThres")
                         ).squeeze()
-
                         # Apply hole mask
                         point_hole_mask = hole_mask.reshape(-1)[: current_mask.shape[0]]
                         final_mask = current_mask & point_hole_mask
@@ -1291,12 +1293,36 @@ class GaussianSplattingGUI:
         if self.render_mode_holes:
             hole_viz = self.detect_holes(img)
 
-            # Draw hole centers and normals
-            if hasattr(self, "hole_normals") and self.hole_normals:
-                for center_x, center_y, normal in self.hole_normals:
-                    self.render_normal_indicator(center_x, center_y, normal, hole_viz)
+            # Draw hole centers from YOLO detection
+            results = self.hole_model(img.cpu().numpy() * 255)
+            for result in results:
+                boxes = result.boxes
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    center_x, center_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
 
-            hole_viz = hole_viz * 0.75
+                    # Draw a small red dot at the center
+                    radius = 3
+                    y_indices, x_indices = torch.meshgrid(
+                        torch.arange(
+                            max(0, center_y - radius),
+                            min(hole_viz.shape[0], center_y + radius + 1),
+                        ),
+                        torch.arange(
+                            max(0, center_x - radius),
+                            min(hole_viz.shape[1], center_x + radius + 1),
+                        ),
+                    )
+                    dist_from_center = torch.sqrt(
+                        (x_indices - center_x) ** 2 + (y_indices - center_y) ** 2
+                    )
+                    mask = dist_from_center <= radius
+                    hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red channel
+                    hole_viz[y_indices[mask], x_indices[mask], 1:] = (
+                        0.0  # Zero other channels
+                    )
+
+            hole_viz = hole_viz * 0.75  # Make it translucent
             self.render_buffer = (
                 hole_viz.cpu().numpy().reshape(-1)
                 if self.render_buffer is None
