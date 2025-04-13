@@ -1416,7 +1416,7 @@ class GaussianSplattingGUI:
                 )
             normal = self.compute_normals_from_neighbors(pose_mask)
             pose_info = {
-                "normal": normal,
+                "normal": normal.tolist(),  # Convert numpy array to list
             }
 
             with open(f"./segmentation_res/{mask_name}_normal.json", "w") as f:
