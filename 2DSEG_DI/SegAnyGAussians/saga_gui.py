@@ -871,9 +871,9 @@ class GaussianSplattingGUI:
         cam = self.construct_camera()
         xyz = self.engine["scene"].get_xyz
 
-        # Move camera parameters to GPU
-        R = cam.R.to(xyz.device)
-        T = cam.T.to(xyz.device)
+        # Convert camera parameters to PyTorch tensors and move to correct device
+        R = torch.from_numpy(cam.R).float().to(xyz.device)
+        T = torch.from_numpy(cam.T).float().to(xyz.device)
 
         # Transform points to camera space
         cam_points = xyz @ R.T + T.unsqueeze(0)
