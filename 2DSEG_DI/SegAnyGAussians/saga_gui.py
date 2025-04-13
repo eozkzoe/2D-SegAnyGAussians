@@ -929,6 +929,97 @@ class GaussianSplattingGUI:
             self.do_pca()  # calculate self.proj_mat
             self.load_model = True
 
+        if self.select_holes_flag:
+            self.select_holes_flag = False
+            print("Segmenting holes...")
+            # Apply hole detection filter
+            feat_pts = self.engine["feature"].get_point_features.squeeze()
+            scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
+            scale_gated_feat_pts = torch.nn.functional.normalize(
+                scale_gated_feat_pts, dim=-1, p=2
+            )
+
+            hole_viz = self.detect_holes(img)
+            hole_mask = hole_viz[..., 2] > 0
+            results = self.hole_model(img.cpu().numpy() * 255)
+
+            # Initialize combined feature mask
+            feature_mask = torch.zeros(
+                feat_pts.shape[0], dtype=torch.bool, device=feat_pts.device
+            )
+            hole_centers = []
+            segmented_hole_centers = []
+
+            # Treat each hole center as a click point
+            featmap = scale_gated_feat.reshape(H, W, -1)
+            combined_feature = None
+
+            for result in results:
+                boxes = result.boxes
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    center_x = (x1 + x2) / 2
+                    center_y = (y1 + y2) / 2
+                    hole_centers.append((center_x, center_y))
+
+                    # Extract feature at hole center
+                    cx, cy = int(center_x), int(center_y)
+                    if (
+                        cx < hole_mask.shape[1]
+                        and cy < hole_mask.shape[0]
+                        and hole_mask[cy, cx]
+                    ):
+                        segmented_hole_centers.append((center_x, center_y))
+                        hole_feat = featmap[cy, cx, :].reshape(featmap.shape[-1], -1)
+
+                        # Combine features from all holes
+                        if combined_feature is None:
+                            combined_feature = hole_feat
+                        else:
+                            combined_feature = torch.cat(
+                                [combined_feature, hole_feat], dim=-1
+                            )
+
+            if combined_feature is not None:
+                # Compute similarity with combined features
+                score_pts = scale_gated_feat_pts @ combined_feature
+                score_pts = (score_pts + 1.0) / 2
+                feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
+
+                # Apply hole mask
+                point_hole_mask = hole_mask.reshape(-1)
+                point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
+                final_mask = feature_mask & point_hole_mask
+
+                # Visualization code
+                if len(segmented_hole_centers) > 0:
+                    os.makedirs("./hole_detections", exist_ok=True)
+                    img_with_dots = img.cpu().numpy().copy() * 255
+                    img_with_dots = img_with_dots.astype(np.uint8)
+
+                    for center in hole_centers:
+                        cx, cy = int(center[0]), int(center[1])
+                        cv2.circle(img_with_dots, (cx, cy), 5, (0, 0, 255), 1)
+
+                    for center in segmented_hole_centers:
+                        cx, cy = int(center[0]), int(center[1])
+                        cv2.circle(img_with_dots, (cx, cy), 5, (255, 0, 0), -1)
+
+                    timestamp = time.strftime("%Y%m%d-%H%M%S")
+                    cv2.imwrite(
+                        f"./hole_detections/holes_{timestamp}.png",
+                        cv2.cvtColor(img_with_dots, cv2.COLOR_RGB2BGR),
+                    )
+                    print(
+                        f"Saved image with {len(segmented_hole_centers)} segmented holes to: ./hole_detections/holes_{timestamp}.png"
+                    )
+
+                self.engine["scene"].segment(final_mask)
+                self.engine["feature"].segment(final_mask)
+                print(f"Segmented {torch.sum(final_mask).item()} points")
+            else:
+                print("No holes detected in current view")
+
         if len(self.new_click_xy) > 0:
             featmap = scale_gated_feat.reshape(H, W, -1)
 
@@ -985,64 +1076,59 @@ class GaussianSplattingGUI:
                 depth2img(depth_score.cpu().numpy()).astype(np.float32) / 255.0
             )
 
-            if self.select_holes_flag:
-                self.select_holes_flag = False
-                print("Segmenting holes...")
-                # Apply hole detection filter
-                feat_pts = self.engine["feature"].get_point_features.squeeze()
-                scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
-                scale_gated_feat_pts = torch.nn.functional.normalize(
-                    scale_gated_feat_pts, dim=-1, p=2
-                )
+            # if self.select_holes_flag:
+            #     self.select_holes_flag = False
+            #     print("Segmenting holes...")
+            #     # Apply hole detection filter
+            #     feat_pts = self.engine["feature"].get_point_features.squeeze()
+            #     scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
+            #     scale_gated_feat_pts = torch.nn.functional.normalize(
+            #         scale_gated_feat_pts, dim=-1, p=2
+            #     )
 
-                score_pts = scale_gated_feat_pts @ self.chosen_feature
-                score_pts = (score_pts + 1.0) / 2
-                feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
-                hole_viz = self.detect_holes(img)
-                hole_mask = hole_viz[..., 2] > 0
-                point_hole_mask = hole_mask.reshape(-1)
-                point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
-                final_mask = feature_mask & point_hole_mask
-                results = self.hole_model(img.cpu().numpy() * 255)
-                hole_centers = []
-                segmented_hole_centers = []
-                
-                for result in results:
-                    boxes = result.boxes
-                    for box in boxes:
-                        x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                        center_x = (x1 + x2) / 2
-                        center_y = (y1 + y2) / 2
-                        hole_centers.append((center_x, center_y))
-                        
-                        # Check if this hole is part of the segmentation
-                        cx, cy = int(center_x), int(center_y)
-                        if cx < hole_mask.shape[1] and cy < hole_mask.shape[0] and hole_mask[cy, cx]:
-                            segmented_hole_centers.append((center_x, center_y))
-                
-                print(f"Detected {len(hole_centers)} holes, {len(segmented_hole_centers)} were segmented")
-                
-                if len(segmented_hole_centers) > 0:
-                    os.makedirs("./hole_detections", exist_ok=True)
-                    img_with_dots = img.cpu().numpy().copy() * 255
-                    img_with_dots = img_with_dots.astype(np.uint8)
-                    
-                    # Draw all detected holes in blue (lighter)
-                    for center in hole_centers:
-                        cx, cy = int(center[0]), int(center[1])
-                        cv2.circle(img_with_dots, (cx, cy), 5, (0, 0, 255), 1)  # Blue circle outline
-                    
-                    # Draw segmented holes in red (stronger)
-                    for center in segmented_hole_centers:
-                        cx, cy = int(center[0]), int(center[1])
-                        cv2.circle(img_with_dots, (cx, cy), 5, (255, 0, 0), -1)  # Red filled circle
-                    
-                    timestamp = time.strftime("%Y%m%d-%H%M%S")
-                    cv2.imwrite(f"./hole_detections/holes_{timestamp}.png", cv2.cvtColor(img_with_dots, cv2.COLOR_RGB2BGR))
-                    print(f"Saved image with {len(segmented_hole_centers)} segmented holes to: ./hole_detections/holes_{timestamp}.png")
-                
-                self.engine["scene"].segment(final_mask)
-                self.engine["feature"].segment(final_mask)
+            #     hole_viz = self.detect_holes(img)
+            #     hole_mask = hole_viz[..., 2] > 0
+            #     results = self.hole_model(img.cpu().numpy() * 255)
+
+            #     # Initialize combined feature mask
+            #     feature_mask = torch.zeros(feat_pts.shape[0], dtype=torch.bool, device=feat_pts.device)
+            #     hole_centers = []
+            #     segmented_hole_centers = []
+
+            #     # Treat each hole center as a click point
+            #     featmap = scale_gated_feat.reshape(H, W, -1)
+            #     combined_feature = None
+
+            #     for result in results:
+            #         boxes = result.boxes
+            #         for box in boxes:
+            #             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            #             center_x = (x1 + x2) / 2
+            #             center_y = (y1 + y2) / 2
+            #             hole_centers.append((center_x, center_y))
+
+            #             # Extract feature at hole center
+            #             cx, cy = int(center_x), int(center_y)
+            #             if cx < hole_mask.shape[1] and cy < hole_mask.shape[0] and hole_mask[cy, cx]:
+            #                 segmented_hole_centers.append((center_x, center_y))
+            #                 hole_feat = featmap[cy, cx, :].reshape(featmap.shape[-1], -1)
+
+            #                 # Combine features from all holes
+            #                 if combined_feature is None:
+            #                     combined_feature = hole_feat
+            #                 else:
+            #                     combined_feature = torch.cat([combined_feature, hole_feat], dim=-1)
+
+            #     if combined_feature is not None:
+            #         # Compute similarity with combined features
+            #         score_pts = scale_gated_feat_pts @ combined_feature
+            #         score_pts = (score_pts + 1.0) / 2
+            #         feature_mask = (score_pts > dpg.get_value("_ScoreThres")).sum(1) > 0
+
+            #     # Apply hole mask
+            #     point_hole_mask = hole_mask.reshape(-1)
+            #     point_hole_mask = point_hole_mask[: feature_mask.shape[0]]
+            #     final_mask = feature_mask & point_hole_mask
 
             if self.segment3d_flag:
                 self.segment3d_flag = False
