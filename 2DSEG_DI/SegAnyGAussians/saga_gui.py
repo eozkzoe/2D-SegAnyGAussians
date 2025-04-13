@@ -851,10 +851,16 @@ class GaussianSplattingGUI:
         """Render a small red circle at hole center"""
         radius = 2  # Small radius for the hole indicator
         y_indices, x_indices = torch.meshgrid(
-            torch.arange(max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)),
-            torch.arange(max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1))
+            torch.arange(
+                max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)
+            ),
+            torch.arange(
+                max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1)
+            ),
         )
-        dist_from_center = torch.sqrt((x_indices - center_x)**2 + (y_indices - center_y)**2)
+        dist_from_center = torch.sqrt(
+            (x_indices - center_x) ** 2 + (y_indices - center_y) ** 2
+        )
         mask = dist_from_center <= radius
         hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red base
         hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0
@@ -992,15 +998,10 @@ class GaussianSplattingGUI:
             feature_mask = torch.zeros(
                 feat_pts.shape[0], dtype=torch.bool, device=feat_pts.device
             )
-            hole_centers = []
-            segmented_hole_centers = []
+            hole_normals = []
 
-            # Treat each hole center as a click point
+            # Process each hole
             featmap = scale_gated_feat.reshape(H, W, -1)
-            combined_feature = None
-
-            hole_normals = []  # Store normals for visualization
-
             for result in results:
                 boxes = result.boxes
                 for box in boxes:
@@ -1013,26 +1014,29 @@ class GaussianSplattingGUI:
                         and center_y < hole_mask.shape[0]
                         and hole_mask[center_y, center_x]
                     ):
-                        # Simulate click at hole center
+                        # Get feature and compute similarity
                         hole_feat = featmap[center_y, center_x, :].reshape(
                             featmap.shape[-1], -1
                         )
-                        hole_normal = normal_map[center_y, center_x]
-
-                        # Segment using this feature
                         score_pts = scale_gated_feat_pts @ hole_feat
                         score_pts = (score_pts + 1.0) / 2
                         current_mask = (
                             score_pts > dpg.get_value("_ScoreThres")
                         ).squeeze()
-                        # Apply hole mask
+
+                        # Apply hole mask to points
                         point_hole_mask = hole_mask.reshape(-1)[: current_mask.shape[0]]
                         final_mask = current_mask & point_hole_mask
 
-                        # Compute normal for this segment
+                        # Segment if we found points
                         if torch.sum(final_mask) > 0:
+                            # Compute normal for visualization
                             normal = self.compute_normals_from_neighbors(final_mask)
                             hole_normals.append((center_x, center_y, normal))
+
+                            # Update scene segmentation
+                            self.engine["scene"].segment(final_mask)
+                            self.engine["feature"].segment(final_mask)
 
             # Store normals for visualization
             self.hole_normals = hole_normals
@@ -1325,7 +1329,7 @@ class GaussianSplattingGUI:
 
             # Combine visualizations
             hole_viz = hole_viz * 0.75
-            normal_viz = normal_viz * 0.25  # Make normal indicators more subtle
+            normal_viz = normal_viz * 0.75  # Make normal indicators more subtle
             combined_viz = hole_viz + normal_viz
 
             self.render_buffer = (
