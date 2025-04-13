@@ -1224,49 +1224,49 @@ class GaussianSplattingGUI:
                     final_mask = final_mask & point_circle_mask
 
                 # Modified holes filtering
-                if self.render_mode_holes:
-                    # Get all point positions in screen space
-                    cam = self.construct_camera()
-                    xyz = self.engine["scene"].get_xyz
+                # if self.render_mode_holes:
+                #     # Get all point positions in screen space
+                #     cam = self.construct_camera()
+                #     xyz = self.engine["scene"].get_xyz
 
-                    # Project points to screen space
-                    R = torch.from_numpy(cam.R).float().to(xyz.device)
-                    T = torch.from_numpy(cam.T).float().to(xyz.device)
-                    cam_points = xyz @ R.T + T.unsqueeze(0)
+                #     # Project points to screen space
+                #     R = torch.from_numpy(cam.R).float().to(xyz.device)
+                #     T = torch.from_numpy(cam.T).float().to(xyz.device)
+                #     cam_points = xyz @ R.T + T.unsqueeze(0)
 
-                    # Perspective projection
-                    fx = self.width / (2 * np.tan(cam.FoVx / 2))
-                    fy = self.height / (2 * np.tan(cam.FoVy / 2))
-                    proj_x = (
-                        cam_points[:, 0] / -cam_points[:, 2]
-                    ) * fx + self.width / 2
-                    proj_y = (
-                        cam_points[:, 1] / -cam_points[:, 2]
-                    ) * fy + self.height / 2
+                #     # Perspective projection
+                #     fx = self.width / (2 * np.tan(cam.FoVx / 2))
+                #     fy = self.height / (2 * np.tan(cam.FoVy / 2))
+                #     proj_x = (
+                #         cam_points[:, 0] / -cam_points[:, 2]
+                #     ) * fx + self.width / 2
+                #     proj_y = (
+                #         cam_points[:, 1] / -cam_points[:, 2]
+                #     ) * fy + self.height / 2
 
-                    # Get hole boxes
-                    results = self.hole_model(img.cpu().numpy() * 255, verbose=False)
-                    point_in_holes = torch.zeros(
-                        xyz.shape[0], dtype=torch.bool, device=xyz.device
-                    )
+                #     # Get hole boxes
+                #     results = self.hole_model(img.cpu().numpy() * 255, verbose=False)
+                #     point_in_holes = torch.zeros(
+                #         xyz.shape[0], dtype=torch.bool, device=xyz.device
+                #     )
 
-                    for result in results:
-                        boxes = result.boxes
-                        for box in boxes:
-                            x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                            x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+                #     for result in results:
+                #         boxes = result.boxes
+                #         for box in boxes:
+                #             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                #             x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
 
-                            # Check which points project into this box
-                            in_box = (
-                                (proj_x >= x1)
-                                & (proj_x <= x2)
-                                & (proj_y >= y1)
-                                & (proj_y <= y2)
-                            )
-                            point_in_holes |= in_box
+                #             # Check which points project into this box
+                #             in_box = (
+                #                 (proj_x >= x1)
+                #                 & (proj_x <= x2)
+                #                 & (proj_y >= y1)
+                #                 & (proj_y <= y2)
+                #             )
+                #             point_in_holes |= in_box
 
-                    # Apply hole mask as final filter
-                    final_mask = final_mask & point_in_holes
+                #     # Apply hole mask as final filter
+                #     final_mask = final_mask & point_in_holes
 
                 self.score_pts_binary = final_mask
                 self.engine["scene"].segment(self.score_pts_binary)
@@ -1459,56 +1459,135 @@ class GaussianSplattingGUI:
     def save_segmentation(self, mask_name):
         try:
             os.makedirs("./segmentation_res", exist_ok=True)
+
+            # Get current camera and scene state
+            cam = self.construct_camera()
+            img = render(cam, self.engine["scene"], self.opt, self.bg_color)[
+                "render"
+            ].permute(1, 2, 0)
+
+            # Get feature map for selections
+            feature_outputs = render_contrastive_feature(
+                cam, self.engine["feature"], self.opt, self.bg_feature
+            )
+            featmap = feature_outputs["render"].permute(1, 2, 0)
+            H, W, C = featmap.shape
+            featmap = featmap.reshape(H, W, -1)
+
+            # Scale and normalize features
+            scale_gated_feat = featmap * self.gates.unsqueeze(0).unsqueeze(0)
+            scale_gated_feat = torch.nn.functional.normalize(
+                scale_gated_feat, dim=-1, p=2
+            )
+
+            # Process each hole center
+            holes_info = []
+            if hasattr(self, "hole_normals"):
+                for center_x, center_y, _ in self.hole_normals:
+                    # Get feature at hole center
+                    new_feat = scale_gated_feat[
+                        int(center_y) % H, int(center_x) % W, :
+                    ].reshape(-1, 1)
+
+                    # Compute similarity scores for this hole
+                    feat_pts = self.engine["feature"].get_point_features.squeeze()
+                    scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
+                    scale_gated_feat_pts = torch.nn.functional.normalize(
+                        scale_gated_feat_pts, dim=-1, p=2
+                    )
+
+                    score_pts = scale_gated_feat_pts @ new_feat
+                    score_pts = (score_pts + 1.0) / 2
+                    hole_mask = score_pts.squeeze() > dpg.get_value("_ScoreThres")
+
+                    # Get positions of selected gaussians
+                    xyz = self.engine["scene"].get_xyz
+                    hole_positions = xyz[hole_mask]
+
+                    if len(hole_positions) > 0:
+                        # Compute fresh normal for this cluster
+                        normal = self.compute_normals_from_neighbors(hole_positions)
+                        center = hole_positions.mean(dim=0).cpu().numpy()
+
+                        holes_info.append(
+                            {
+                                "center": center.tolist(),
+                                "normal": normal.tolist(),
+                                "screen_pos": [float(center_x), float(center_y)],
+                            }
+                        )
+
+            # Save hole information
+            with open(f"./segmentation_res/{mask_name}_holes.json", "w") as f:
+                json.dump({"holes": holes_info}, f, indent=2)
+
+            print(
+                f"Saved {len(holes_info)} holes information to: ./segmentation_res/{mask_name}_holes.json"
+            )
+
+            # Save the original full mask for compatibility
             save_mask = (
                 self.engine["scene"]._mask == self.engine["scene"].segment_times + 1
             )
             torch.save(save_mask, f"./segmentation_res/{mask_name}.pt")
-            print(f"Saved segmentation mask to: ./segmentation_res/{mask_name}.pt")
 
-            pose_mask = torch.load(f"./segmentation_res/{mask_name}.pt")
-            pose_mask = pose_mask.squeeze()
-            if torch.count_nonzero(pose_mask) == 0:
-                pose_mask = ~pose_mask
-                print(
-                    "Seems like the mask is empty, segmenting the whole point cloud. Please click segment3d first."
-                )
-            normal = self.compute_normals_from_neighbors(pose_mask)
-            pose_info = {
-                "normal": normal.tolist(),  # Convert numpy array to list
-            }
-
-            with open(f"./segmentation_res/{mask_name}_normal.json", "w") as f:
-                json.dump(pose_info, f, indent=2)
-
-            print(
-                f"Saved normal information to: ./segmentation_res/{mask_name}_normal.json"
-            )
-            print(f"normal: {normal}")
-
-            # self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
-            # pose = self.pose_estimator.estimate_pose()
-            # bbox = self.pose_estimator.get_oriented_bbox()
-            # pose_info = {
-            #     "centroid": pose["centroid"].tolist(),
-            #     "normal": pose["normal"].tolist(),
-            #     "planarity": float(pose["planarity"]),
-            #     "bbox_center": bbox["center"].tolist(),
-            #     "bbox_axes": bbox["axes"].tolist(),
-            #     "bbox_dimensions": bbox["dimensions"].tolist(),
-            # }
-            # with open(f"./segmentation_res/{mask_name}_pose.json", "w") as f:
-            #     json.dump(pose_info, f, indent=2)
-
-            # print(f"Saved pose information to {pose_path}")
-            # print(f"Centroid: {pose['centroid']}")
-            # print(f"Normal: {pose['normal']}")
-            # print(f"Planarity: {pose['planarity']:.3f}")
         except Exception as e:
-            print(e)
-            with dpg.window(label="Tips"):
-                dpg.add_text(
-                    "You should segment the 3D object before save it (click segment3d first)."
-                )
+            print(f"Error in save_segmentation: {e}")
+            raise e
+
+    # def save_segmentation(self, mask_name):
+    #     try:
+    #         os.makedirs("./segmentation_res", exist_ok=True)
+    #         save_mask = (
+    #             self.engine["scene"]._mask == self.engine["scene"].segment_times + 1
+    #         )
+    #         torch.save(save_mask, f"./segmentation_res/{mask_name}.pt")
+    #         print(f"Saved segmentation mask to: ./segmentation_res/{mask_name}.pt")
+
+    #         pose_mask = torch.load(f"./segmentation_res/{mask_name}.pt")
+    #         pose_mask = pose_mask.squeeze()
+    #         if torch.count_nonzero(pose_mask) == 0:
+    #             pose_mask = ~pose_mask
+    #             print(
+    #                 "Seems like the mask is empty, segmenting the whole point cloud. Please click segment3d first."
+    #             )
+    #         normal = self.compute_normals_from_neighbors(pose_mask)
+    #         pose_info = {
+    #             "normal": normal.tolist(),  # Convert numpy array to list
+    #         }
+
+    #         with open(f"./segmentation_res/{mask_name}_normal.json", "w") as f:
+    #             json.dump(pose_info, f, indent=2)
+
+    #         print(
+    #             f"Saved normal information to: ./segmentation_res/{mask_name}_normal.json"
+    #         )
+    #         print(f"normal: {normal}")
+
+    #         # self.pose_estimator = PoseEstimator(self.gaussian_model, pose_mask)
+    #         # pose = self.pose_estimator.estimate_pose()
+    #         # bbox = self.pose_estimator.get_oriented_bbox()
+    #         # pose_info = {
+    #         #     "centroid": pose["centroid"].tolist(),
+    #         #     "normal": pose["normal"].tolist(),
+    #         #     "planarity": float(pose["planarity"]),
+    #         #     "bbox_center": bbox["center"].tolist(),
+    #         #     "bbox_axes": bbox["axes"].tolist(),
+    #         #     "bbox_dimensions": bbox["dimensions"].tolist(),
+    #         # }
+    #         # with open(f"./segmentation_res/{mask_name}_pose.json", "w") as f:
+    #         #     json.dump(pose_info, f, indent=2)
+
+    #         # print(f"Saved pose information to {pose_path}")
+    #         # print(f"Centroid: {pose['centroid']}")
+    #         # print(f"Normal: {pose['normal']}")
+    #         # print(f"Planarity: {pose['planarity']:.3f}")
+    #     except Exception as e:
+    #         print(e)
+    #         with dpg.window(label="Tips"):
+    #             dpg.add_text(
+    #                 "You should segment the 3D object before save it (click segment3d first)."
+    #             )
 
 
 if __name__ == "__main__":
