@@ -913,9 +913,10 @@ class GaussianSplattingGUI:
         max_depth = depths[0]  # Starting depth
 
         for i in range(len(screen_points)):
-            x, y = int(screen_points[i].cpu().item()), int(
-                screen_points[i].cpu().item()
-            )
+            # Access x and y coordinates separately
+            x = int(screen_points[i, 0].cpu().item())
+            y = int(screen_points[i, 1].cpu().item())
+
             if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
                 # Size and color based on depth
                 depth_ratio = (depths[i] / max_depth).cpu().item()
