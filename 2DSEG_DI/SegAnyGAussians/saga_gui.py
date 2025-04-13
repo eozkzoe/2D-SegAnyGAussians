@@ -1462,9 +1462,8 @@ class GaussianSplattingGUI:
 
             # Get current camera and scene state
             cam = self.construct_camera()
-            img = render(cam, self.engine["scene"], self.opt, self.bg_color)[
-                "render"
-            ].permute(1, 2, 0)
+            scene_outputs = render(cam, self.engine["scene"], self.opt, self.bg_color)
+            rendered_normals = scene_outputs["normal"].permute(1, 2, 0)
 
             # Get feature map for selections
             feature_outputs = render_contrastive_feature(
@@ -1484,12 +1483,10 @@ class GaussianSplattingGUI:
             holes_info = []
             if hasattr(self, "hole_normals"):
                 for center_x, center_y, _ in self.hole_normals:
-                    # Get feature at hole center
+                    # Get feature at hole center and compute mask
                     new_feat = scale_gated_feat[
                         int(center_y) % H, int(center_x) % W, :
                     ].reshape(-1, 1)
-
-                    # Compute similarity scores for this hole
                     feat_pts = self.engine["feature"].get_point_features.squeeze()
                     scale_gated_feat_pts = feat_pts * self.gates.unsqueeze(0)
                     scale_gated_feat_pts = torch.nn.functional.normalize(
@@ -1500,24 +1497,33 @@ class GaussianSplattingGUI:
                     score_pts = (score_pts + 1.0) / 2
                     hole_mask = score_pts.squeeze() > dpg.get_value("_ScoreThres")
 
-                    # Get positions of selected gaussians
+                    # Get positions and compute normal using GMM
                     xyz = self.engine["scene"].get_xyz
                     hole_positions = xyz[hole_mask]
 
                     if len(hole_positions) > 0:
-                        # Compute fresh normal for this cluster
-                        normal = self.compute_normals_from_neighbors(hole_positions)
-                        center = hole_positions.mean(dim=0).cpu().numpy()
+                        # Project points to get valid mask for GMM
+                        R = torch.from_numpy(cam.R).float().to(xyz.device)
+                        T = torch.from_numpy(cam.T).float().to(xyz.device)
+                        cam_points = hole_positions @ R.T + T.unsqueeze(0)
 
-                        holes_info.append(
-                            {
-                                "center": center.tolist(),
-                                "normal": normal.tolist(),
-                                "screen_pos": [float(center_x), float(center_y)],
-                            }
+                        # Get normals for selected points
+                        valid_mask = torch.norm(rendered_normals, dim=-1) > 0.1
+                        dominant_normal, _ = self.compute_dominant_normal_gmm(
+                            rendered_normals, valid_mask
                         )
 
-            # Save hole information
+                        if dominant_normal is not None:
+                            center = hole_positions.mean(dim=0).cpu().numpy()
+                            holes_info.append(
+                                {
+                                    "center": center.tolist(),
+                                    "normal": dominant_normal.cpu().numpy().tolist(),
+                                    "screen_pos": [float(center_x), float(center_y)],
+                                }
+                            )
+
+            # Save results
             with open(f"./segmentation_res/{mask_name}_holes.json", "w") as f:
                 json.dump({"holes": holes_info}, f, indent=2)
 
@@ -1525,7 +1531,7 @@ class GaussianSplattingGUI:
                 f"Saved {len(holes_info)} holes information to: ./segmentation_res/{mask_name}_holes.json"
             )
 
-            # Save the original full mask for compatibility
+            # Save the original full mask
             save_mask = (
                 self.engine["scene"]._mask == self.engine["scene"].segment_times + 1
             )
