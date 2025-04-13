@@ -867,36 +867,46 @@ class GaussianSplattingGUI:
 
     def render_3d_normal_indicator(self, center_x, center_y, normal, img, normal_map):
         """Render a 3D normal indicator by creating a small line in world space"""
-        # Get depth at this point
-        depth = torch.norm(normal_map[center_y, center_x], dim=-1)
-        if depth < 0.1:  # Skip if depth is too small
-            return
-
-        # Create points along the normal direction
-        length = 0.1  # Length of normal visualization in world space
-        points = torch.linspace(0, length, steps=10)
-
-        # Project points to screen space
+        # Get camera and world position
         cam = self.construct_camera()
-        world_points = torch.tensor(
-            [
-                [
-                    center_x + normal[0] * p,
-                    center_y + normal[1] * p,
-                    depth + normal[2] * p,
-                ]
-                for p in points
-            ],
-            device=normal_map.device,
-        )
+        xyz = self.engine["scene"].get_xyz
 
-        # Draw the points
-        for point in world_points:
-            x, y = int(point[0]), int(point[1])
+        # Find closest point to clicked position in screen space
+        screen_pos = torch.tensor([[center_x, center_y]], device=xyz.device)
+        proj = cam.project(xyz)  # [N, 2]
+        distances = torch.norm(proj - screen_pos, dim=1)
+        closest_idx = torch.argmin(distances)
+        world_pos = xyz[closest_idx]
+
+        # Create points along the normal direction in world space
+        length = 0.05  # Length of normal visualization
+        steps = 20
+        points = torch.linspace(0, length, steps=steps, device=world_pos.device)
+        world_points = world_pos.unsqueeze(0) + torch.from_numpy(normal).to(
+            world_pos.device
+        ).unsqueeze(0) * points.unsqueeze(1)
+
+        # Project points to screen space using camera
+        screen_points = cam.project(world_points)  # [steps, 2]
+
+        # Draw the points with depth-based size and color
+        depths = torch.norm(world_points - cam.T.to(world_points.device), dim=1)
+        max_depth = depths[0]  # Starting depth
+
+        for i in range(len(screen_points)):
+            x, y = int(screen_points[i, 0]), int(screen_points[i, 1])
             if 0 <= x < img.shape[1] and 0 <= y < img.shape[0]:
-                img[y - 1 : y + 2, x - 1 : x + 2] = torch.tensor(
-                    [1.0, 0.0, 0.0]
-                )  # Red dot
+                # Size and color based on depth
+                depth_ratio = depths[i] / max_depth
+                size = max(1, int(3 * (1.0 - i / steps)))
+                color = torch.tensor([1.0, 0.0, 0.0]) * (
+                    1.0 - depth_ratio
+                )  # Fade with depth
+
+                # Draw point
+                y_range = slice(max(0, y - size), min(img.shape[0], y + size + 1))
+                x_range = slice(max(0, x - size), min(img.shape[1], x + size + 1))
+                img[y_range, x_range] = color
 
     @torch.no_grad()
     def fetch_data(self, view_camera):
@@ -1338,6 +1348,8 @@ class GaussianSplattingGUI:
                 else self.render_buffer + combined_viz.cpu().numpy().reshape(-1)
             )
             render_num += 1
+
+        self.render_buffer / render_num
 
         dpg.set_value("_texture", self.render_buffer)
 
