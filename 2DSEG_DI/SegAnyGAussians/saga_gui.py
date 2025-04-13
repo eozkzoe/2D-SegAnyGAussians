@@ -1280,6 +1280,26 @@ class GaussianSplattingGUI:
 
         if self.render_mode_holes:
             hole_viz = self.detect_holes(img)
+            
+            # Draw hole centers from YOLO detection
+            results = self.hole_model(img.cpu().numpy() * 255)
+            for result in results:
+                boxes = result.boxes
+                for box in boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    center_x, center_y = int((x1 + x2) / 2), int((y1 + y2) / 2)
+                    
+                    # Draw a small red dot at the center
+                    radius = 3
+                    y_indices, x_indices = torch.meshgrid(
+                        torch.arange(max(0, center_y - radius), min(hole_viz.shape[0], center_y + radius + 1)),
+                        torch.arange(max(0, center_x - radius), min(hole_viz.shape[1], center_x + radius + 1))
+                    )
+                    dist_from_center = torch.sqrt((x_indices - center_x)**2 + (y_indices - center_y)**2)
+                    mask = dist_from_center <= radius
+                    hole_viz[y_indices[mask], x_indices[mask], 0] = 1.0  # Red channel
+                    hole_viz[y_indices[mask], x_indices[mask], 1:] = 0.0  # Zero other channels
+            
             hole_viz = hole_viz * 0.75  # Make it translucent
             self.render_buffer = (
                 hole_viz.cpu().numpy().reshape(-1)
@@ -1287,8 +1307,6 @@ class GaussianSplattingGUI:
                 else self.render_buffer + hole_viz.cpu().numpy().reshape(-1)
             )
             render_num += 1
-
-        self.render_buffer /= render_num
 
         dpg.set_value("_texture", self.render_buffer)
 
