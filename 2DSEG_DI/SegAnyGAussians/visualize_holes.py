@@ -13,11 +13,15 @@ def visualize_holes(json_path, vector_length=0.1):
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111, projection="3d")
 
-    # Rotation matrix for 90 degrees around x-axis
+    # Calculate mean center of all points
+    centers = np.array([np.array(hole["center"]) for hole in data["holes"]])
+    mean_center = np.mean(centers, axis=0)
+
+    # Rotation matrix for 90 degrees CCW
     rot_matrix = np.array([
+        [0, -1, 0],
         [1, 0, 0],
-        [0, 0, -1],
-        [0, 1, 0]
+        [0, 0, 1]
     ])
 
     # Plot each hole center and normal
@@ -25,6 +29,11 @@ def visualize_holes(json_path, vector_length=0.1):
         # Get center and normal
         center = np.array(hole["center"])
         normal = np.array(hole["normal"])
+
+        # Translate to origin, rotate, and translate back
+        center_centered = center - mean_center
+        center = (rot_matrix @ center_centered) + mean_center
+        normal = rot_matrix @ normal
 
         # Rotate normal vector
         normal = rot_matrix @ normal
