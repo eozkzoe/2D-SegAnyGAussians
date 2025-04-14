@@ -1531,21 +1531,6 @@ class GaussianSplattingGUI:
                         if dominant_normal is not None:
                             center = hole_positions.mean(dim=0).cpu().numpy()
                             normal = -dominant_normal.cpu().numpy()
-                            
-                            # Calculate mean center of all holes
-                            centers = np.array([h["center"] for h in holes_info]) if holes_info else np.array([center])
-                            mean_center = np.mean(centers, axis=0)
-                            
-                            # Rotate about mean center
-                            rot_matrix = np.array([[0.707, 0, 0.707], 
-                                                 [0, 1, 0], 
-                                                 [-0.707, 0, 0.707]])
-                            
-                            # Translate to origin, rotate, and translate back
-                            center_centered = center - mean_center
-                            center = (rot_matrix @ center_centered) + mean_center
-                            normal = rot_matrix @ normal
-                            
                             holes_info.append(
                                 {
                                     "center": center.tolist(),
@@ -1558,7 +1543,29 @@ class GaussianSplattingGUI:
                         self.engine["scene"].roll_back()
                         self.engine["feature"].roll_back()
 
-            # Save hole information
+            # Apply transformations to all holes after collecting them
+            if holes_info:
+                # Calculate mean center from all holes
+                centers = np.array([np.array(h["center"]) for h in holes_info])
+                mean_center = np.mean(centers, axis=0)
+                
+                # Rotation matrix
+                rot_matrix = np.array([[0.707, 0, 0.707], 
+                                     [0, 1, 0], 
+                                     [-0.707, 0, 0.707]])
+                
+                # Transform all holes
+                for hole in holes_info:
+                    center = np.array(hole["center"])
+                    normal = np.array(hole["normal"])
+                    
+                    # Translate to origin, rotate, and translate back
+                    center_centered = center - mean_center
+                    center = (rot_matrix @ center_centered) + mean_center
+                    normal = rot_matrix @ normal
+                    
+                    hole["center"] = center.tolist()
+                    hole["normal"] = normal.tolist()
             with open(f"./segmentation_res/{mask_name}_holes.json", "w") as f:
                 json.dump({"holes": holes_info}, f, indent=2)
 
