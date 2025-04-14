@@ -1035,6 +1035,7 @@ class GaussianSplattingGUI:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     center_x = int((x1 + x2) / 2)
                     center_y = int((y1 + y2) / 2)
+                    self.new_click_xy.append((center_x, center_y))
 
                     # Get feature and normal at hole center
                     new_feat = featmap[center_y % H, center_x % W, :].reshape(
