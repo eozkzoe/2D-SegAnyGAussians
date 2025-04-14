@@ -17,7 +17,6 @@ def visualize_holes(json_path, vector_length=0.1):
     centers = np.array([np.array(hole["center"]) for hole in data["holes"]])
     mean_center = np.mean(centers, axis=0)
 
-    # Rotation matrix for 90 degrees CCW
     rot_matrix = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
 
     # Plot each hole center and normal
@@ -31,14 +30,8 @@ def visualize_holes(json_path, vector_length=0.1):
         center = (rot_matrix @ center_centered) + mean_center
         normal = rot_matrix @ normal
 
-        # Rotate normal vector
-        normal = rot_matrix @ normal
-
         # Normalize normal vector and scale to desired length
         normal = normal / np.linalg.norm(normal) * vector_length
-
-        # Calculate end point of normal vector
-        end_point = center + normal
 
         # Plot center point
         ax.scatter(center[0], center[1], center[2], color="blue", s=100)

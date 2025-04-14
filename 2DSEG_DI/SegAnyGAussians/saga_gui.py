@@ -1548,22 +1548,22 @@ class GaussianSplattingGUI:
                 # Calculate mean center from all holes
                 centers = np.array([np.array(h["center"]) for h in holes_info])
                 mean_center = np.mean(centers, axis=0)
-                
+
                 # Rotation matrix
-                rot_matrix = np.array([[0.707, 0, 0.707], 
-                                     [0, 1, 0], 
-                                     [-0.707, 0, 0.707]])
-                
+                rot_matrix = np.array(
+                    [[0.707, 0, 0.707], [0, 1, 0], [-0.707, 0, 0.707]]
+                )
+
                 # Transform all holes
                 for hole in holes_info:
                     center = np.array(hole["center"])
                     normal = np.array(hole["normal"])
-                    
+
                     # Translate to origin, rotate, and translate back
                     center_centered = center - mean_center
                     center = (rot_matrix @ center_centered) + mean_center
                     normal = rot_matrix @ normal
-                    
+
                     hole["center"] = center.tolist()
                     hole["normal"] = normal.tolist()
             with open(f"./segmentation_res/{mask_name}_holes.json", "w") as f:
