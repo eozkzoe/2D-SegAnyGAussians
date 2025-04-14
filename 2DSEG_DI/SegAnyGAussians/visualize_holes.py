@@ -18,11 +18,7 @@ def visualize_holes(json_path, vector_length=0.1):
     mean_center = np.mean(centers, axis=0)
 
     # Rotation matrix for 90 degrees CCW
-    rot_matrix = np.array([
-        [0, -1, 0],
-        [1, 0, 0],
-        [0, 0, 1]
-    ])
+    rot_matrix = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
 
     # Plot each hole center and normal
     for hole in data["holes"]:
