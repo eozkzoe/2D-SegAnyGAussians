@@ -9,34 +9,26 @@ def visualize_holes(json_path, vector_length=0.1):
     with open(json_path, "r") as f:
         data = json.load(f)
 
-    # Create figure and 3D axes
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111, projection="3d")
 
-    # Calculate mean center of all points
     centers = np.array([np.array(hole["center"]) for hole in data["holes"]])
     mean_center = np.mean(centers, axis=0)
 
-    rot_matrix = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+    rot_matrix = np.array([[0.707, 0, 0.707], [0, -1, 0], [-0.707, 0, 0.707]])
 
-    # Plot each hole center and normal
     for hole in data["holes"]:
         # Get center and normal
         center = np.array(hole["center"])
         normal = np.array(hole["normal"])
 
-        # Translate to origin, rotate, and translate back
         center_centered = center - mean_center
         center = (rot_matrix @ center_centered) + mean_center
         normal = rot_matrix @ normal
 
-        # Normalize normal vector and scale to desired length
         normal = normal / np.linalg.norm(normal) * vector_length
 
-        # Plot center point
         ax.scatter(center[0], center[1], center[2], color="blue", s=100)
-
-        # Plot normal vector
         ax.quiver(
             center[0],
             center[1],
